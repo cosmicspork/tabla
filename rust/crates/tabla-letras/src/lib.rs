@@ -9,6 +9,7 @@
 //! makes that harder than tic tac toe found it, and how it is done is written up
 //! in `ARCHITECTURE.md` under the fairness tiers.
 
+pub mod audit;
 pub mod board;
 pub mod draw;
 pub mod game;

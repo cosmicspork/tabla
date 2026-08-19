@@ -17,14 +17,14 @@ pub const SEED_I: [u8; 32] = [0x11; 32];
 pub const SEED_C: [u8; 32] = [0x22; 32];
 
 /// A word list small enough that a test can say exactly what is and is not a
-/// word, built with the real compiler so the reader is exercised too.
+/// word. Compiled with the real builder, so the reader is exercised too.
+pub const DEFAULT_WORDS: [&str; 27] = [
+    "at", "ate", "cat", "cats", "cot", "cots", "do", "dog", "dogs", "eat", "eats", "in", "into",
+    "it", "no", "not", "on", "one", "so", "sat", "set", "ten", "tin", "to", "toe", "ton", "too",
+];
+
 pub fn dictionary() -> Vec<u8> {
-    tabla_dawg::build::compile(&[
-        "at", "ate", "cat", "cats", "cot", "cots", "do", "dog", "dogs", "eat", "eats", "in",
-        "into", "it", "no", "not", "on", "one", "so", "sat", "set", "ten", "tin", "to", "toe",
-        "ton", "too",
-    ])
-    .expect("test word list compiles")
+    tabla_dawg::build::compile(&DEFAULT_WORDS).expect("test word list compiles")
 }
 
 pub fn dictionary_hash(bytes: &[u8]) -> Hash {
@@ -55,7 +55,22 @@ pub struct Table {
 
 impl Table {
     pub fn new() -> Self {
-        let assets = dictionary();
+        Self::with_words(&DEFAULT_WORDS)
+    }
+
+    /// A game whose word list is chosen by the test.
+    ///
+    /// Racks are dealt by the draw protocol and cannot be arranged, so a test
+    /// about challenges works the other way round: find out what was dealt, then
+    /// build a word list that does or does not contain what can be spelled with
+    /// it. The deal does not depend on the word list, so the same tiles come up
+    /// either way.
+    pub fn with_words(words: &[&str]) -> Self {
+        let mut sorted: Vec<&str> = words.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+
+        let assets = tabla_dawg::build::compile(&sorted).expect("test word list compiles");
         let config = config_for(&dictionary_hash(&assets));
 
         Self {
@@ -160,6 +175,60 @@ impl Table {
             a.opponent_tiles as usize,
             "rack sizes disagree"
         );
+    }
+
+    /// Plays the first `count` tiles of the mover's rack across the centre row,
+    /// and reports what they spelled.
+    ///
+    /// Racks are dealt, not chosen, so a test that cares about a particular word
+    /// has to find out what it was handed and build its word list to suit.
+    pub fn play_from_rack(&mut self, count: usize) -> String {
+        let who = self.to_move();
+        let rack = self.view(who).rack;
+
+        let placements: Vec<crate::board::Placement> = rack
+            .bytes()
+            .take(count)
+            .enumerate()
+            .map(|(i, byte)| crate::board::Placement {
+                row: 7,
+                col: 7 + i as u8,
+                tile: if byte == b'?' {
+                    crate::tiles::BLANK
+                } else {
+                    crate::tiles::tile_of(byte).expect("rack letters")
+                },
+                // A blank has to stand for something; `e` will do.
+                blank_as: (byte == b'?').then_some(crate::tiles::tile_of(b'e').unwrap()),
+            })
+            .collect();
+
+        let word: String = rack
+            .chars()
+            .take(count)
+            .map(|c| if c == '?' { 'e' } else { c })
+            .collect();
+
+        self.play(Action::Place { placements })
+            .expect("a play from one's own rack is legal");
+        word
+    }
+
+    /// What the opening rack would spell, without playing anything.
+    ///
+    /// Used to build a word list before the game that will use it exists.
+    pub fn opening_word(count: usize) -> String {
+        let mut scratch = Table::new();
+        scratch.open();
+        let who = scratch.to_move();
+
+        scratch
+            .view(who)
+            .rack
+            .chars()
+            .take(count)
+            .map(|c| if c == '?' { 'e' } else { c })
+            .collect()
     }
 
     /// Runs the opening: two commitments, the toss, and a yield if it is owed.

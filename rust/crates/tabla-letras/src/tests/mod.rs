@@ -1,3 +1,4 @@
 mod board;
+mod challenge;
 mod harness;
 mod protocol;

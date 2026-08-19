@@ -28,6 +28,9 @@ use tabla_plugin_api::{
     GamePlugin, Outcome, PLAYER_CLAIMER, PLAYER_INITIATOR, PlayerId, PluginError,
 };
 
+use tabla_dawg::Dawg;
+
+use crate::audit::{Verdict, audit};
 use crate::board::*;
 use crate::draw::*;
 use crate::tiles::*;
@@ -87,6 +90,12 @@ pub enum Action {
         masked: Vec<u8>,
     },
     Pass,
+    /// Disputes the opponent's last play. Legal only as the entry immediately
+    /// after it, so the window is exactly one turn wide.
+    Challenge,
+    /// The turn a challenged player loses. A no-op, but the log alternates
+    /// strictly, so a lost turn has to be something rather than nothing.
+    Forfeit,
     /// Publishes this player's seed and final rack so every draw they made can
     /// be recomputed and checked.
     Reveal {
@@ -109,6 +118,12 @@ pub enum Event {
         player: PlayerId,
         tiles: Vec<Tile>,
     },
+    /// A play that was challenged off the board. The opponent saw the tiles and
+    /// will never draw them; the player who put them down still holds them.
+    Seen {
+        player: PlayerId,
+        tiles: Vec<Tile>,
+    },
     Exchanged {
         player: PlayerId,
         masked: Vec<u8>,
@@ -119,14 +134,21 @@ pub enum Event {
     },
 }
 
-/// The last play, for display and — from the next milestone — for challenges.
+/// The play a challenge would be against: what went down, what it spelled, and
+/// what it scored, all of which have to be undone if the challenge succeeds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LastPlay {
     pub by: PlayerId,
+    pub placements: Vec<Placement>,
     pub words: Vec<String>,
-    pub cells: Vec<usize>,
     pub score: i32,
+}
+
+impl LastPlay {
+    pub fn cells(&self) -> Vec<usize> {
+        self.placements.iter().map(Placement::cell).collect()
+    }
 }
 
 /// What a player published at the end.
@@ -180,7 +202,10 @@ pub struct State {
     ending: bool,
     /// Who played out their rack, if that is how it ended.
     went_out: Option<PlayerId>,
+    /// Who owes the no-op turn a lost challenge costs them.
+    must_forfeit: Option<PlayerId>,
     reveals: [Option<Revealed>; 2],
+    verdict: Option<Verdict>,
     finished: Option<Outcome>,
     final_scores: Option<[i32; 2]>,
 }
@@ -192,6 +217,7 @@ pub enum Expect {
     Toss,
     Yield,
     Play,
+    Forfeit,
     Reveal,
     Nothing,
 }
@@ -206,12 +232,75 @@ impl State {
         if self.finished.is_some() {
             return Expect::Nothing;
         }
+        if self.must_forfeit == Some(self.to_move()) {
+            return Expect::Forfeit;
+        }
         match self.move_index {
             0 | 1 => Expect::Commit,
             2 => Expect::Toss,
             3 if self.first == Some(PLAYER_INITIATOR) => Expect::Yield,
             _ if self.ending => Expect::Reveal,
             _ => Expect::Play,
+        }
+    }
+
+    /// Whether this player may dispute what is on the board right now.
+    ///
+    /// Only the entry immediately after a play, and only against the other
+    /// player: anything else the opponent does closes the window, which is what
+    /// makes waiving a challenge implicit rather than a move of its own.
+    pub fn can_challenge(&self, player: PlayerId) -> bool {
+        self.finished.is_none()
+            && self.must_forfeit.is_none()
+            && self
+                .last_play
+                .as_ref()
+                .is_some_and(|play| play.by != player)
+    }
+
+    /// Puts a challenged play back where it came from.
+    ///
+    /// The tiles return to the rack they came off, the score goes back, and the
+    /// premium squares are freed again by the simple fact that nothing is
+    /// sitting on them. The refill that play had earned is cancelled — which is
+    /// exactly why refills wait for the opponent's next entry rather than
+    /// landing immediately.
+    fn retract(&mut self, play: &LastPlay) {
+        let tiles: Vec<Tile> = play.placements.iter().map(|p| p.tile).collect();
+
+        for placement in &play.placements {
+            self.board[placement.cell()] = None;
+        }
+        self.scores[play.by as usize] -= play.score;
+        self.pending[play.by as usize] = 0;
+
+        if self.me == Some(play.by) {
+            self.rack.extend(tiles.iter().copied());
+        } else {
+            self.opponent_tiles += tiles.len() as u8;
+            // Not returned to the unseen pool: they were seen, and they are
+            // provably on the opponent's rack rather than back in the bag.
+        }
+
+        // The audit needs to know these tiles went down and came back, or it
+        // would conclude the player spent tiles they still hold.
+        if let Some(event) = self
+            .events
+            .iter_mut()
+            .rev()
+            .find(|e| matches!(e, Event::Played { player, .. } if *player == play.by))
+        {
+            *event = Event::Seen {
+                player: play.by,
+                tiles,
+            };
+        }
+
+        // A play that emptied a rack has been taken back, so the game is not
+        // over after all.
+        if self.went_out == Some(play.by) {
+            self.went_out = None;
+            self.ending = false;
         }
     }
 
@@ -303,11 +392,43 @@ impl State {
         }
     }
 
-    /// Settles the score once both players have opened their racks.
+    /// Settles the game once both players have opened their racks.
+    ///
+    /// The audit comes first and outranks the score: a player who cannot show
+    /// that their tiles were the ones they drew has lost, however far ahead
+    /// they were.
     fn settle(&mut self) {
         let (Some(a), Some(b)) = (&self.reveals[0], &self.reveals[1]) else {
             return;
         };
+
+        let committed = [
+            self.seed_hash[0].unwrap_or_default(),
+            self.seed_hash[1].unwrap_or_default(),
+        ];
+        let verdict = audit(&self.events, &[a.clone(), b.clone()], &committed);
+        self.verdict = Some(verdict);
+
+        match (verdict.passed(0), verdict.passed(1)) {
+            (true, true) => {}
+            (false, true) => {
+                self.finished = Some(Outcome::Winner {
+                    player: PLAYER_CLAIMER,
+                });
+                return;
+            }
+            (true, false) => {
+                self.finished = Some(Outcome::Winner {
+                    player: PLAYER_INITIATOR,
+                });
+                return;
+            }
+            // Nobody can claim a game neither of them played straight.
+            (false, false) => {
+                self.finished = Some(Outcome::Draw);
+                return;
+            }
+        }
 
         let held = [rack_value(&a.rack), rack_value(&b.rack)];
         let mut final_scores = self.scores;
@@ -408,7 +529,9 @@ impl GamePlugin for Letras {
             scoreless: 0,
             ending: false,
             went_out: None,
+            must_forfeit: None,
             reveals: [None, None],
+            verdict: None,
             finished: None,
             final_scores: None,
         })
@@ -444,6 +567,19 @@ impl GamePlugin for Letras {
             reason: "that is not what the game is waiting for",
         });
 
+        // A challenge cuts across whatever else the game was waiting for: the
+        // window is open for exactly one entry, including the entry that would
+        // otherwise have started the reveals.
+        if let Action::Challenge = mv.action {
+            return if state.can_challenge(player) {
+                Ok(())
+            } else {
+                Err(PluginError::IllegalMove {
+                    reason: "there is nothing to challenge",
+                })
+            };
+        }
+
         match (state.expected(), &mv.action) {
             (Expect::Commit, Action::Commit { .. }) => Ok(()),
 
@@ -457,6 +593,8 @@ impl GamePlugin for Letras {
             }
 
             (Expect::Yield, Action::Yield) => Ok(()),
+
+            (Expect::Forfeit, Action::Forfeit) => Ok(()),
 
             (Expect::Play, Action::Place { placements }) => {
                 validate_placement(&state.board, placements).map_err(|why| {
@@ -518,11 +656,28 @@ impl GamePlugin for Letras {
         }
     }
 
-    fn apply_move(mut state: State, mv: &Move, _assets: &[u8]) -> Result<State, PluginError> {
+    fn apply_move(mut state: State, mv: &Move, assets: &[u8]) -> Result<State, PluginError> {
         let player = state.to_move();
         let opponent = 1 - player;
 
-        // Whatever the opponent is owed is dealt against this entry's nonce.
+        // A challenge is settled before anything else, because a successful one
+        // cancels the refill the disputed play had earned. That is the reason
+        // refills wait for this entry instead of landing when the play is made.
+        let upheld = match mv.action {
+            Action::Challenge => {
+                let play = state.last_play.clone().ok_or(PluginError::BadState)?;
+                let good = every_word_is_real(&play, assets)?;
+                if !good {
+                    state.retract(&play);
+                    state.must_forfeit = Some(play.by);
+                }
+                Some(good)
+            }
+            _ => None,
+        };
+
+        // Whatever the opponent is owed is dealt against this entry's nonce —
+        // unless the play that earned it has just been taken back.
         state.refill(opponent, &mv.nonce);
 
         if let Some(hash) = mv.rack_commitment {
@@ -578,11 +733,11 @@ impl GamePlugin for Letras {
 
                 state.last_play = Some(LastPlay {
                     by: player,
+                    placements: placements.clone(),
                     words: words
                         .iter()
                         .map(|w| String::from_utf8_lossy(&w.text()).into_owned())
                         .collect(),
-                    cells: placements.iter().map(Placement::cell).collect(),
                     score,
                 });
 
@@ -627,6 +782,20 @@ impl GamePlugin for Letras {
                 state.last_play = None;
             }
 
+            Action::Challenge => {
+                // Right or wrong, the challenge cost this turn and closed the
+                // window: a play cannot be disputed twice.
+                state.scoreless += 1;
+                state.last_play = None;
+                debug_assert!(upheld.is_some(), "a challenge was adjudicated above");
+            }
+
+            Action::Forfeit => {
+                state.must_forfeit = None;
+                state.scoreless += 1;
+                state.last_play = None;
+            }
+
             Action::Reveal { seed, rack } => {
                 if state.me != Some(player) {
                     state.forget(rack);
@@ -663,13 +832,26 @@ impl GamePlugin for Letras {
                 Expect::Toss => "toss",
                 Expect::Yield => "yield",
                 Expect::Play => "play",
+                Expect::Forfeit => "forfeit",
                 Expect::Reveal => "reveal",
                 Expect::Nothing => "over",
             },
             first: state.first,
             outcome: state.finished,
             scoreless: state.scoreless,
-            last_play: state.last_play.clone(),
+            last_play: state.last_play.as_ref().map(|play| LastPlayView {
+                by: play.by,
+                words: play.words.clone(),
+                cells: play.cells(),
+                score: play.score,
+            }),
+            can_challenge: state.can_challenge(me),
+            audit: state.verdict.map(|verdict| AuditView {
+                ok: [verdict.passed(0), verdict.passed(1)],
+                notes: verdict
+                    .findings
+                    .map(|finding| finding.map(|f| f.describe().to_string())),
+            }),
             rack_commitment: state.owed_commitment(),
             auto: automatic(state, me),
         }
@@ -678,6 +860,22 @@ impl GamePlugin for Letras {
     fn is_game_over(state: &State) -> Option<Outcome> {
         state.finished
     }
+}
+
+/// Whether every word a play made is in the word list.
+///
+/// This is the only place the dictionary is consulted, and it happens only when
+/// someone asks. A play is legal the moment it is geometrically sound; whether
+/// it is *English* is a question the opponent has to raise, and pays for if they
+/// raise it wrongly. Checking it automatically would make bluffing impossible
+/// and turn the word list into a rule rather than a referee.
+fn every_word_is_real(play: &LastPlay, assets: &[u8]) -> Result<bool, PluginError> {
+    let dictionary = Dawg::parse(assets).map_err(|_| PluginError::BadAssets)?;
+
+    Ok(play
+        .words
+        .iter()
+        .all(|word| dictionary.contains(word.as_bytes())))
 }
 
 fn digest_of(bytes: &[u8]) -> Hash {
@@ -710,6 +908,7 @@ fn automatic(state: &State, me: PlayerId) -> Option<Action> {
             entropy: first_entropy(&state.seed),
         }),
         Expect::Yield => Some(Action::Yield),
+        Expect::Forfeit => Some(Action::Forfeit),
         Expect::Reveal => Some(Action::Reveal {
             seed: state.seed,
             rack: state.rack.clone(),
@@ -749,12 +948,34 @@ pub struct View {
     pub first: Option<PlayerId>,
     pub outcome: Option<Outcome>,
     pub scoreless: u8,
-    pub last_play: Option<LastPlay>,
+    pub last_play: Option<LastPlayView>,
+    /// Whether this player may dispute what the opponent just played.
+    pub can_challenge: bool,
+    /// Present once both seeds are open and every draw has been rechecked.
+    pub audit: Option<AuditView>,
     /// The commitment this player's next entry must carry, to be passed back
     /// verbatim.
     pub rack_commitment: Option<Hash>,
     /// A move the client should make on its own.
     pub auto: Option<Action>,
+}
+
+/// The last play, as the UI needs it: what it spelled, where, and for how much.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LastPlayView {
+    pub by: PlayerId,
+    pub words: Vec<String>,
+    pub cells: Vec<usize>,
+    pub score: i32,
+}
+
+/// What the end-of-game check concluded about each player.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditView {
+    pub ok: [bool; 2],
+    pub notes: [Option<String>; 2],
 }
 
 fn render_board(board: &[Option<Placed>]) -> String {
