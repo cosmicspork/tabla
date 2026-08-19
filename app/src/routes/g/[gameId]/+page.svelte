@@ -11,6 +11,7 @@
   import { refreshPendingGame } from '$lib/games.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
   import { currentSubscription } from '$lib/push.ts';
+  import { installPlugin, installedState, InstallError } from '$lib/plugin/install.ts';
   import { gameEntry, titleOf, type BoardProps } from '$lib/registry.ts';
   import type { PushSubscriptionJson } from '@tabla/shared';
 
@@ -21,6 +22,7 @@
   let board = $state<BoardState | null>(null);
   let Board = $state<Component<BoardProps> | null>(null);
   let failure = $state<string | null>(null);
+  let downloading = $state<{ title: string; bytes: number } | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   $effect(() => {
@@ -81,6 +83,11 @@
       const entry = gameEntry(record.pluginId);
       if (entry) Board = (await entry.board()).default;
 
+      // Rules for a game the app does not carry are fetched and checked before
+      // the board opens, so a player waits once, here, with an explanation —
+      // rather than watching an empty board and wondering.
+      if (entry?.distribution === 'downloadable') await download(entry.id, entry.title);
+
       const opened = await GameSession.open(record);
       session = opened;
 
@@ -96,7 +103,43 @@
       const existing = await currentSubscription();
       if (existing) opened.subscribeToPush(existing);
     } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
+      failure = describe(error);
+    }
+  }
+
+  function describe(error: unknown): string {
+    if (error instanceof InstallError) {
+      switch (error.kind) {
+        case 'offline':
+          return 'This game needs a one-time download and there is no connection. It plays offline once it has been downloaded.';
+        case 'tampered':
+        case 'corrupt':
+          return 'This copy of tabla failed its own integrity check, so it will not load the game. Reinstalling the app should fix it.';
+        default:
+          return 'This version of tabla does not have this game.';
+      }
+    }
+
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  /**
+   * Fetches a game's rules, saying so while it happens.
+   *
+   * Only the first time on a device: they are kept afterwards, and survive
+   * both app updates and going offline. A failure here is worth naming
+   * precisely, because "come back when you have a signal" and "this copy of
+   * tabla is not intact" call for very different things from a player.
+   */
+  async function download(pluginId: string, title: string) {
+    const state = await installedState(pluginId).catch(() => null);
+    if (state?.installed) return;
+
+    downloading = { title, bytes: state?.totalBytes ?? 0 };
+    try {
+      await installPlugin(pluginId);
+    } finally {
+      downloading = null;
     }
   }
 
@@ -172,6 +215,16 @@
       onsubscribe={(subscription: PushSubscriptionJson) => session?.subscribeToPush(subscription)}
     />
   </div>
+{:else if downloading}
+  <h1>Getting {downloading.title}…</h1>
+  <p class="muted">
+    {#if downloading.bytes > 0}
+      A one-time download of about {Math.round(downloading.bytes / 100_000) / 10} MB.
+    {:else}
+      A one-time download.
+    {/if}
+    It is kept on this device afterwards, so the game plays offline from here on.
+  </p>
 {:else if board && !board.ready}
   <h1>Setting up…</h1>
   <p class="muted">Waiting for the opening entries to reach both devices.</p>

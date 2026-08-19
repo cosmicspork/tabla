@@ -28,6 +28,9 @@ js-sys = "0.3"
 # shipped for one game carries no code for any other. The default is the module
 # the app bundles; a downloadable one is built with a single game selected.
 [features]
-default = ["tictactoe", "letras"]
+# The app bundles tic tac toe and nothing else, so a fresh install can play
+# without a network. Every other game is a module of its own, downloaded and
+# checked against the signed manifest on first use.
+default = ["tictactoe"]
 tictactoe = ["dep:tabla-tictactoe"]
 letras = ["dep:tabla-letras"]
