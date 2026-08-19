@@ -7,5 +7,7 @@ repository.workspace = true
 description = "Pure-function game plugin interface for tabla"
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-postcard = { version = "1.1", features = ["alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+postcard = { version = "1.1", default-features = false, features = ["alloc"] }
+# Views cross into TypeScript, so they are rendered as JSON rather than postcard.
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
