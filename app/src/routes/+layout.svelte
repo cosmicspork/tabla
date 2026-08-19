@@ -1,7 +1,13 @@
 <script lang="ts">
   import '../app.css';
 
+  import { captureSimulationFlag } from '$lib/lifecycle.ts';
+
   let { children } = $props();
+
+  $effect(() => {
+    captureSimulationFlag();
+  });
 </script>
 
 <div class="shell">

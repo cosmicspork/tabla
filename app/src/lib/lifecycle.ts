@@ -41,12 +41,42 @@ export function onShouldResync(handler: Handler): () => void {
   };
 }
 
+const SIMULATE_KEY = 'tabla:simulate-standalone';
+
+/**
+ * Records the dev-only `?simulate=ios-standalone` flag for the rest of the
+ * session.
+ *
+ * Called once at startup rather than lazily: the flag arrives on the first URL
+ * and is gone by the time the app has navigated to a game, which is where the
+ * installed-only paths actually matter.
+ */
+export function captureSimulationFlag(): void {
+  simulatingStandalone();
+}
+
+/**
+ * A dev-only escape hatch for exercising the installed-only paths on a desktop
+ * browser: `?simulate=ios-standalone`.
+ */
+function simulatingStandalone(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    if (new URLSearchParams(location.search).get('simulate') === 'ios-standalone') {
+      sessionStorage.setItem(SIMULATE_KEY, '1');
+      return true;
+    }
+    return sessionStorage.getItem(SIMULATE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the app is running as an installed PWA rather than in a tab. */
 export function isStandalone(): boolean {
   if (typeof window === 'undefined') return false;
-
-  // A dev-only escape hatch for exercising the installed-only paths on desktop.
-  if (new URLSearchParams(location.search).get('simulate') === 'ios-standalone') return true;
+  if (simulatingStandalone()) return true;
 
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
@@ -56,7 +86,7 @@ export function isStandalone(): boolean {
 
 export function isIos(): boolean {
   if (typeof navigator === 'undefined') return false;
-  if (new URLSearchParams(location.search).get('simulate') === 'ios-standalone') return true;
+  if (simulatingStandalone()) return true;
 
   return (
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||

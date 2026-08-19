@@ -1,4 +1,5 @@
 <script lang="ts">
+  import BackupPanel from '$lib/components/BackupPanel.svelte';
   import { listContacts } from '$lib/db/store.ts';
   import type { ContactRecord } from '$lib/db/schema.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
@@ -25,6 +26,8 @@
     </p>
     <p class="mono key">{publicKey}</p>
   </section>
+
+  <BackupPanel />
 
   <section class="card">
     <h2>People you have played</h2>

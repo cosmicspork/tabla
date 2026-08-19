@@ -24,7 +24,15 @@ export default defineConfig({
   webServer: {
     // `just build` first: the Worker serves app/build as static assets.
     // The wipe endpoint is dev-only and off by default, so enable it here.
-    command: 'bunx wrangler dev --port 8787 --var TABLA_TEST_ENDPOINTS:true',
+    // Throwaway VAPID keys so the notification UI has something to offer; the
+    // wipe endpoint is dev-only and off by default.
+    command: [
+      'bunx wrangler dev --port 8787',
+      '--var TABLA_TEST_ENDPOINTS:true',
+      '--var VAPID_SUBJECT:mailto:tests@tabla.invalid',
+      '--var VAPID_PUBLIC_KEY:BIDXmumdfsiZPy2txPb8QGYvBw3NhTT007jCFFtnMjbIzl70LyaemszVUkk0Li5v8KocHDEQET9jXOLaiWPdRdU',
+      '--var VAPID_PRIVATE_KEY:qnDPmxTwbcx22FeqwG-ygCWHLje_yAojv2hquHBGsyY',
+    ].join(' '),
     cwd: '../worker',
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: true,

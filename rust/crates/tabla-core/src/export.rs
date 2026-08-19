@@ -62,6 +62,10 @@ pub struct GameExport {
     pub initiator_pub_key: [u8; PUBKEY_LEN],
     pub claimer_pub_key: [u8; PUBKEY_LEN],
     pub blob_id: [u8; 16],
+    /// The entropy the invite carried, needed to reconstruct the starting
+    /// position. Tic tac toe ignores it, but a game with hidden state cannot be
+    /// replayed without it, so it belongs in the backup.
+    pub seed: [u8; 32],
     /// Encoded log entries, in order.
     pub entries: Vec<Vec<u8>>,
 }

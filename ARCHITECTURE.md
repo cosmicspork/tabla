@@ -408,9 +408,26 @@ omitted it would be worthless.
   XChaCha20-Poly1305( postcard{ identity_seed, contacts, logs } )
 ```
 
+## What is not automatically verifiable
+
+Stated plainly, because a test suite that stays quiet about its blind spots is
+worse than one that names them:
+
+- **Push delivery.** Everything up to the push service's door is tested; the leg
+  through APNs and FCM cannot run in CI. Delivery is a manual check on a real
+  device, described in the README.
+- **Real iOS behaviour.** The install gate, standalone detection, and offline
+  shell are exercised against an emulated iPhone, which gets the user agent and
+  viewport right but is still Chromium. Home Screen installation, seven-day
+  cache eviction, and Safari's push implementation need hardware.
+- **Tombstone permanence against the operator.** A tombstone protects against a
+  relay that lost data or is lying about history. It cannot protect against
+  someone with database access deleting the row; that is outside the threat
+  model and no client-side protocol can fix it.
+
 ## Phases
 
-1. **Now:** the full pipe, with tic tac toe.
+1. **Done:** the full pipe, with tic tac toe.
 2. Word game: SCOWL/ENABLE-derived word list (never TWL/NWL or Collins), original
    board, tile distribution, and name; commit-reveal bag with end-of-game audit.
 3. Downloadable plugins with signed manifests and pinned hashes.

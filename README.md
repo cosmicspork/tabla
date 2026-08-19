@@ -13,7 +13,13 @@ later; see [ARCHITECTURE.md](ARCHITECTURE.md) for the protocol and the phase pla
 
 ## Status
 
-Phase 1 (the full vertical slice with tic tac toe) is under construction.
+**Phase 1 is complete**: identity, single-use encrypted invites, the signed
+hash-chained log, the zero-knowledge relay, live and asynchronous sync, offline
+play, content-free push, and encrypted backup — proven end to end with tic tac
+toe.
+
+Phase 2 (the word game) has not been started. See [ARCHITECTURE.md](ARCHITECTURE.md)
+for the plan and for every protocol decision.
 
 ## Stack
 
@@ -59,8 +65,18 @@ prompts, or push — those behave differently under the Vite dev server.
 ```bash
 just build      # wasm -> app -> worker
 just test       # cargo test + vitest (worker, app)
+just test-e2e   # browser acceptance tests against the built app
 just check      # fmt check, clippy, svelte-check
 ```
+
+What the suites cover:
+
+| Suite | What it proves |
+|---|---|
+| `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift |
+| `worker` vitest | the relay's storage, single-use claims, retention and tombstones, and a full two-client game over real WebSockets inside workerd, including eviction and re-upload |
+| `app` vitest | that the TypeScript boundary produces the same bytes as the Rust vectors, and that the relay's framing helpers agree with the core |
+| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, and the iOS install/offline paths |
 
 ## Verifying push on a real device
 

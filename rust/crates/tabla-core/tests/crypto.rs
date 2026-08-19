@@ -540,6 +540,7 @@ fn bundle() -> ExportBundle {
             initiator_pub_key: a.public_key(),
             claimer_pub_key: b.public_key(),
             blob_id: BLOB,
+            seed: [9u8; 32],
             entries: entries.iter().map(|e| e.encode()).collect(),
         }],
         exported_at: 1_780_000_100,
