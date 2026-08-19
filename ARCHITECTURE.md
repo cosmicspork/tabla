@@ -255,8 +255,32 @@ DO is fresh or was evicted — the first client back re-uploads its whole log.
 
 The relay's checks are strictly transport-level: contiguous `seq` (the SQLite
 primary key doubles as the tiebreaker for a simultaneous-append race), `prevHash`
-continuity against its own copy, and a 64 KiB per-entry cap. It cannot do more,
-and must not try.
+continuity against its own copy, and a 64 KiB per-entry cap. Batches apply
+all-or-nothing, and re-sending an entry the relay already holds is accepted as a
+no-op if it is byte-identical — reconnecting clients do this routinely — but
+refused if it differs. It cannot do more, and must not try.
+
+### Exactly how much the relay understands
+
+The relay reads an entry's **framing** and nothing else: the sequence number at
+offset 12, the previous hash at offset 16, and the entry's own hash, computed as
+SHA-256 over everything but the trailing 64-byte signature. It never touches the
+payload, and holds no key with which it could.
+
+That much is needed for two jobs:
+
+1. Refusing an append that does not continue the log it already holds, so a
+   racing or buggy client cannot corrupt the shared copy.
+2. Writing an accurate tombstone. The relay computes the tip hash **itself**
+   rather than believing a client, because a client that reported a hash for a
+   history that never existed could otherwise permanently block its opponent
+   from restoring the game.
+
+This duplicates a small piece of the format in TypeScript
+(`shared/src/framing.ts`), which is a real drift risk: a disagreement with the
+Rust core would mean silently rejected appends or tombstones pointing at nothing.
+So a test builds real signed entries with the Rust core and asserts the
+TypeScript helpers read the same sequence numbers and compute the same hashes.
 
 Everything above works fully asynchronously. A live socket is an optimization;
 making a move, closing the app, and having the opponent move six hours later is

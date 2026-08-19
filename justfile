@@ -35,8 +35,12 @@ wasm-plugin:
 app: wasm
     cd app && bun run build
 
-# Type-check and build the Worker without deploying
-worker:
+# Regenerate Worker binding types from wrangler.jsonc
+types:
+    cd worker && bunx wrangler types
+
+# Type-check the Worker without deploying
+worker: types
     cd worker && bun run check
 
 # Full build: WASM -> app -> worker
@@ -60,7 +64,7 @@ test-rust:
     cd rust && cargo test
 
 # TypeScript tests (shared, worker unit + integration, app)
-test-ts:
+test-ts: types
     cd worker && bun run test
     cd app && bun run test
 

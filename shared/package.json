@@ -6,7 +6,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./protocol": "./src/protocol.ts",
-    "./constants": "./src/constants.ts"
+    "./constants": "./src/constants.ts",
+    "./bytes": "./src/bytes.ts",
+    "./framing": "./src/framing.ts"
   },
   "dependencies": {
     "zod": "^4.4.3"

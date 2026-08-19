@@ -2,9 +2,19 @@
  * tabla relay.
  *
  * This Worker is deliberately incurious: it routes ciphertext between two
- * clients and stores it as an offline mailbox. It never holds a key, never
- * verifies a signature, and cannot read a move. All validation is client-side.
+ * clients and stores it as an offline mailbox. It holds no key, verifies no
+ * signature, and cannot read a move. Everything it does understand about an
+ * entry is described in `@tabla/shared/framing`.
  */
+import {
+  BLOB_ID_LEN,
+  ErrorCode,
+  claimInviteRequestSchema,
+  createInviteRequestSchema,
+  fromBase64Url,
+  toBase64Url,
+} from '@tabla/shared';
+
 import type { Env } from './env.ts';
 
 export { GameRoomDO } from './game-room.ts';
@@ -15,16 +25,113 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/ws/')) {
-      return route(request, env, url);
+      try {
+        return await route(request, env, url);
+      } catch (error) {
+        // Never leak internals; there is nothing here worth describing anyway.
+        console.error('relay error', error);
+        return json({ code: 'internal' }, 500);
+      }
     }
 
-    // Static assets are served by the assets binding; run_worker_first keeps
-    // this branch unreachable in production, but it matters under `vitest`.
+    // Static assets. `run_worker_first` keeps this unreachable in production,
+    // but it matters when the Worker is exercised directly under test.
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler<Env>;
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
-  // Filled in across milestones 6 and 7.
-  return new Response('not found', { status: 404 });
+  const path = url.pathname;
+
+  if (path === '/api/health') {
+    return json({ ok: true });
+  }
+
+  if (path === '/api/invite' && request.method === 'POST') {
+    return createInvite(request, env);
+  }
+
+  const inviteMatch = path.match(/^\/api\/invite\/([A-Za-z0-9_-]{22})(\/claim)?$/);
+  if (inviteMatch) {
+    const [, blobId, claimPath] = inviteMatch;
+    if (claimPath && request.method === 'POST') return claimInvite(request, env, blobId);
+    if (request.method === 'GET') return inviteStatus(env, blobId);
+    return json({ code: 'method_not_allowed' }, 405);
+  }
+
+  if (env.TABLA_TEST_ENDPOINTS === 'true') {
+    const wipe = path.match(/^\/api\/_test\/wipe\/([A-Za-z0-9_-]{22})$/);
+    if (wipe && request.method === 'POST') {
+      await roomFor(env, wipe[1]).wipeForTest();
+      return json({ ok: true });
+    }
+  }
+
+  return json({ code: ErrorCode.NotFound }, 404);
+}
+
+// -- invites ----------------------------------------------------------------
+
+async function createInvite(request: Request, env: Env): Promise<Response> {
+  const parsed = createInviteRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  // The relay picks the blob id so a client cannot squat on or overwrite one.
+  const blobId = toBase64Url(crypto.getRandomValues(new Uint8Array(BLOB_ID_LEN)));
+  const blob = fromBase64Url(parsed.data.blob);
+
+  const stub = env.INVITES.get(env.INVITES.idFromName(blobId));
+  const { expiresAt } = await stub.create(blobId, toArrayBuffer(blob), Date.now());
+
+  return json({ blobId, expiresAt }, 201);
+}
+
+async function claimInvite(request: Request, env: Env, blobId: string): Promise<Response> {
+  const parsed = claimInviteRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const stub = env.INVITES.get(env.INVITES.idFromName(blobId));
+  const result = await stub.claim(parsed.data.claimerPubKey, parsed.data.sig, Date.now());
+
+  if (!result.ok) {
+    const status =
+      result.code === ErrorCode.AlreadyClaimed ? 409 : result.code === ErrorCode.Expired ? 410 : 404;
+    return json({ code: result.code }, status);
+  }
+
+  return json({ blob: result.blob });
+}
+
+async function inviteStatus(env: Env, blobId: string): Promise<Response> {
+  const stub = env.INVITES.get(env.INVITES.idFromName(blobId));
+  const status = await stub.status();
+
+  if (!status.exists) return json({ code: ErrorCode.NotFound }, 404);
+
+  return json({
+    claimed: status.claimed,
+    claimerPubKey: status.claimerPubKey,
+    sig: status.sig,
+  });
+}
+
+// -- helpers ----------------------------------------------------------------
+
+/** Room instances are addressed by name, so a game always finds its own room. */
+export function roomFor(env: Env, gameId: string) {
+  return env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(gameId));
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
 }

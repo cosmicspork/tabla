@@ -5,6 +5,7 @@ build/
 .wrangler/
 target/
 app/src/lib/wasm/pkg/
+worker/worker-configuration.d.ts
 *.log
 .DS_Store
 .env
