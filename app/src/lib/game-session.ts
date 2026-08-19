@@ -11,6 +11,7 @@ import { appendEntries, loadEntries, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { dictionaryBytes } from './dict.ts';
+import { pluginBytes } from './plugin/install.ts';
 import { pluginHost } from './plugin/host.ts';
 import type { PluginOutcome } from './plugin/protocol.ts';
 import { openGameSocket } from './relay.ts';
@@ -71,9 +72,11 @@ export class GameSession {
   }
 
   private async initialize(): Promise<void> {
-    // The sandbox cannot fetch anything, so the main thread supplies the word
-    // list when the rules ask for it.
+    // The sandbox cannot fetch anything, so the main thread supplies both the
+    // rules and the word list when it asks for them. Both are checked against
+    // the signed manifest before they get anywhere near the worker.
     pluginHost().useAssetSource(dictionaryBytes);
+    pluginHost().useModuleSource(pluginBytes);
 
     const { core, identity } = await loadIdentity();
     this.core = core;

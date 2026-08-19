@@ -10,9 +10,11 @@
  * The capability removal is defence in depth, not the primary control — the
  * primary control is that nothing secret is ever sent here.
  */
-import { loadPlugin } from '../wasm/plugin.ts';
+import { loadLetras } from '../wasm/letras.ts';
+import { loadPlugin, type PluginModule } from '../wasm/plugin.ts';
 import {
   ASSET_MISSING,
+  MODULE_MISSING,
   type PluginOutcome,
   type PluginRequest,
   type PluginResponse,
@@ -40,6 +42,23 @@ for (const capability of [
 const ready = loadPlugin();
 
 /**
+ * Rules the app does not bundle, which this worker can initialize but never
+ * obtain.
+ *
+ * Each entry is a loader for a module whose glue ships with the app, waiting
+ * for bytes. The bytes come from the host, which fetched them and checked them
+ * against the signed manifest; there is no path from here to a network, and
+ * the generated loaders have had their own fetch fallbacks removed, so this
+ * worker cannot acquire code even by accident.
+ */
+const loaders: Record<string, (bytes: Uint8Array) => Promise<PluginModule>> = {
+  letras: loadLetras,
+};
+
+/** Modules already initialized here, bundled or provided. */
+const modules = new Map<string, PluginModule>();
+
+/**
  * Reference data, keyed by hash, kept so a large word list crosses the boundary
  * once rather than on every render.
  *
@@ -63,9 +82,46 @@ self.addEventListener('message', (event: MessageEvent<PluginRequest>) => {
   void handle(event.data);
 });
 
+/**
+ * The module that plays this game.
+ *
+ * The bundled one answers for the games compiled into the app. Anything else
+ * has to have been provided; asking for one that has not been is a request the
+ * host can satisfy and retry, which is what `MODULE_MISSING` says.
+ */
+async function moduleFor(pluginId: string): Promise<PluginModule> {
+  const bundled = await ready;
+  if (bundled.available_plugins().includes(pluginId)) return bundled;
+
+  const provided = modules.get(pluginId);
+  if (provided) return provided;
+
+  if (pluginId in loaders) throw new Error(MODULE_MISSING);
+  throw new Error(`unknown plugin: ${pluginId}`);
+}
+
+/** Which module a request is about, if it names a game at all. */
+function pluginOf(request: PluginRequest): string | undefined {
+  return 'pluginId' in request ? request.pluginId : undefined;
+}
+
 async function handle(request: PluginRequest): Promise<void> {
   try {
-    const plugin = await ready;
+    if (request.op === 'provideModule') {
+      const load = loaders[request.pluginId];
+      if (!load) throw new Error(`unknown plugin: ${request.pluginId}`);
+
+      modules.set(request.pluginId, await load(request.bytes));
+      self.postMessage({
+        id: request.id,
+        ok: true,
+        result: { kind: 'ok' },
+      } satisfies PluginResponse);
+      return;
+    }
+
+    const pluginId = pluginOf(request);
+    const plugin = pluginId === undefined ? await ready : await moduleFor(pluginId);
     const result = run(plugin, request);
     self.postMessage({
       id: request.id,
@@ -82,12 +138,17 @@ async function handle(request: PluginRequest): Promise<void> {
 }
 
 function run(
-  plugin: Awaited<ReturnType<typeof loadPlugin>>,
-  request: PluginRequest,
+  plugin: PluginModule,
+  request: Exclude<PluginRequest, { op: 'provideModule' }>,
 ): PluginResponse['result'] {
   switch (request.op) {
     case 'availablePlugins':
-      return { kind: 'strings', value: plugin.available_plugins() };
+      // What this worker can play right now: what the app bundled, plus
+      // whatever has been handed to it since.
+      return {
+        kind: 'strings',
+        value: [...plugin.available_plugins(), ...modules.keys()].toSorted(),
+      };
 
     case 'pluginVersion':
       return { kind: 'number', value: plugin.plugin_version(request.pluginId) };
