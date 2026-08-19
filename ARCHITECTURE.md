@@ -77,7 +77,7 @@ serialization library in the trusted path.
 
 ```
 preimage :=
-  "tabla-log/v1"          13 bytes, fixed ASCII domain tag
+  "tabla-log/v1"          12 bytes, fixed ASCII domain tag
   u32   seq
   [32]  prevHash          all-zero at seq 0
   [16]  gameId
@@ -112,22 +112,37 @@ enum EntryBody {
 
 ### Verification
 
-A client accepts a log only if all of the following hold. Any failure is fatal
-to that suffix — the client keeps its own version and refuses to advance.
+Verification happens in two layers, and the split is deliberate.
+
+**Structural** (`tabla_core::log`, needs only the two public keys):
 
 1. `seq` is contiguous from 0 with no gaps.
 2. Each `prevHash` equals the `entryHash` of the preceding entry; `prevHash` is
    zero at seq 0.
 3. Every signature verifies against the author's Ed25519 public key.
-4. `authorKeyHash` alternates between exactly the two participants bound to the
-   game, in the order the game's rules require.
-5. Every payload decrypts under the per-game key.
-6. Each decoded move passes the plugin's `validate_move` against the state
+4. Every author is one of the two participants bound to the game.
+5. Every entry carries the expected `gameId`.
+
+**Semantic** (needs the per-game key):
+
+6. Every payload decrypts under the per-game key.
+7. Authorship follows the turn order the game requires.
+8. Each decoded move passes the plugin's `validate_move` against the state
    produced by replaying all prior moves.
 
-Turn alternation is enforced here, on the client, by rule 4 — not by the relay,
-which cannot tell one participant's ciphertext from the other's beyond the key
-hash it routes on.
+The layers are separate because turn order is not a structural property: a
+resignation is legal out of turn, so deciding whether an entry is correctly
+placed requires knowing what kind of entry it is, which requires the key. Keeping
+the structural layer key-free is what lets a client sanity-check a log it has
+just pulled from an evicted relay before it has derived anything.
+
+Any failure is fatal to the suffix being checked. The client keeps its own copy
+and refuses to advance — there is no safe way to partially accept a history that
+failed verification.
+
+Turn alternation is enforced on the client, never by the relay, which cannot
+tell one participant's ciphertext from the other's beyond the key hash it routes
+on.
 
 ## Key derivation
 
