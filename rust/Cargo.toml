@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/tabla-core",
+    "crates/tabla-dawg",
     "crates/tabla-plugin-api",
     "crates/tabla-tictactoe",
     "crates/tabla-wasm",
@@ -16,6 +17,7 @@ repository = "https://github.com/cosmicspork/tabla"
 
 [workspace.dependencies]
 tabla-core = { path = "crates/tabla-core" }
+tabla-dawg = { path = "crates/tabla-dawg" }
 tabla-plugin-api = { path = "crates/tabla-plugin-api" }
 tabla-tictactoe = { path = "crates/tabla-tictactoe" }
 

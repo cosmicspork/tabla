@@ -776,6 +776,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabla-dawg"
+version = "0.1.0"
+
+[[package]]
 name = "tabla-plugin-api"
 version = "0.1.0"
 dependencies = [

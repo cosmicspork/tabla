@@ -1,0 +1,22 @@
+[package]
+name = "tabla-dawg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The reader links into the plugin WASM module, which holds no keys and no
+# cryptography. It therefore has no dependencies at all: a word list is read
+# with integer arithmetic and bounds checks, and nothing else.
+[dependencies]
+
+[features]
+# The builder is a host-side tool. Keeping it behind a feature means the
+# minimisation machinery — hash maps, sorting, allocation-heavy interning — is
+# not compiled into the module that ships to a browser.
+default = []
+build = []
+
+[[bin]]
+name = "build-dict"
+required-features = ["build"]
