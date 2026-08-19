@@ -87,6 +87,27 @@ pub fn plugin_version(plugin_id: &str) -> Result<u32, JsError> {
     Ok(lookup(plugin_id)?.version())
 }
 
+/// The deck a game with hidden state is dealt from, in canonical order.
+///
+/// Empty for a game that has none. This is public information — the same list
+/// on both devices, which is exactly why establishing the deck costs no log
+/// entries — and it lives with the rules because the rules are what define it.
+/// The host needs it to set up the deal, which happens on the other side of
+/// this boundary, where the keys are.
+#[wasm_bindgen]
+pub fn deck(plugin_id: &str) -> Result<Vec<u8>, JsError> {
+    // Not on the plugin trait: only a game that hides something has a deck, and
+    // widening the trait for one of them would be describing tic tac toe in
+    // terms it has no use for.
+    #[cfg(feature = "letras-v2")]
+    if plugin_id == tabla_letras::v2::Letras::ID {
+        return Ok(tabla_letras::tiles::deck());
+    }
+
+    lookup(plugin_id)?;
+    Ok(Vec::new())
+}
+
 /// `assets` is the bulk reference data a game needs — a word list, say. It is
 /// passed in because a plugin cannot fetch anything itself, and the game checks
 /// it against the hash its configuration pins rather than trusting the host.

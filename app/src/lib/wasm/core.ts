@@ -31,4 +31,12 @@ export function coreIsLoaded(): boolean {
   return ready !== null;
 }
 
-export type { Identity, Invite, Log, Replay, Session } from './pkg/core/tabla_core.js';
+export type {
+  DealFacts,
+  DealSession,
+  Identity,
+  Invite,
+  Log,
+  Replay,
+  Session,
+} from './pkg/core/tabla_core.js';

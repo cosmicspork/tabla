@@ -161,10 +161,19 @@ function run(
     case 'pluginVersion':
       return { kind: 'number', value: plugin.plugin_version(request.pluginId) };
 
+    case 'deck':
+      return { kind: 'bytes', value: plugin.deck(request.pluginId) };
+
     case 'encodeMove':
       return {
         kind: 'bytes',
         value: plugin.encodeMove(request.pluginId, request.json),
+      };
+
+    case 'decodeMove':
+      return {
+        kind: 'string',
+        value: plugin.decodeMove(request.pluginId, request.move),
       };
 
     case 'provideAsset':

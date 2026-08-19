@@ -8,7 +8,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 export const DB_NAME = 'tabla';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 /** Which side of the invite we were on. Decides who moves first. */
 export type Role = 'initiator' | 'claimer';
@@ -99,6 +99,22 @@ export interface ContactRecord {
   lastPlayed: number;
 }
 
+/**
+ * A verified deal, written down so reopening a game need not re-verify its log.
+ *
+ * Only meaningful against the log it was taken from, which is why the tip it
+ * belongs to is stored beside it. A mismatch is not an error — it just costs a
+ * re-verify, which is the correct price for a log that has changed underneath.
+ */
+export interface DealRecord {
+  gameId: string;
+  /** The highest sequence this snapshot accounts for. */
+  tipSeq: number;
+  /** base64url hash of the log at that sequence. */
+  tipHash: string;
+  snapshot: Uint8Array;
+}
+
 interface TablaDB extends DBSchema {
   meta: {
     key: string;
@@ -122,6 +138,10 @@ interface TablaDB extends DBSchema {
     key: string;
     value: BlobRecord;
     indexes: { byPlugin: string };
+  };
+  deals: {
+    key: string;
+    value: DealRecord;
   };
 }
 
@@ -159,6 +179,10 @@ export function db(): Promise<TablaDatabase> {
       if (!database.objectStoreNames.contains('blobs')) {
         const blobs = database.createObjectStore('blobs', { keyPath: 'sha256' });
         blobs.createIndex('byPlugin', 'pluginId');
+      }
+
+      if (!database.objectStoreNames.contains('deals')) {
+        database.createObjectStore('deals', { keyPath: 'gameId' });
       }
     },
   });

@@ -14,6 +14,17 @@ export function apply_move(
 export function available_plugins(): string[];
 
 /**
+ * The deck a game with hidden state is dealt from, in canonical order.
+ *
+ * Empty for a game that has none. This is public information — the same list
+ * on both devices, which is exactly why establishing the deck costs no log
+ * entries — and it lives with the rules because the rules are what define it.
+ * The host needs it to set up the deal, which happens on the other side of
+ * this boundary, where the keys are.
+ */
+export function deck(plugin_id: string): Uint8Array;
+
+/**
  * Renders an encoded move back as JSON.
  */
 export function decodeMove(plugin_id: string, bytes: Uint8Array): string;
@@ -97,6 +108,7 @@ export interface InitOutput {
     h: number,
   ) => [number, number, number, number];
   readonly available_plugins: () => [number, number];
+  readonly deck: (a: number, b: number) => [number, number, number, number];
   readonly decodeMove: (
     a: number,
     b: number,

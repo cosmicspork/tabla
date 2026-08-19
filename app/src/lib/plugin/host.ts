@@ -177,6 +177,18 @@ export class PluginHost {
   }
 
   /**
+   * The deck this game is dealt from, in canonical order.
+   *
+   * Public information, and the same on both devices — which is why setting up
+   * a deal costs no log entries. Empty for a game that hides nothing.
+   */
+  async deck(pluginId: string, pluginVersion: number): Promise<Uint8Array> {
+    const result = await this.call({ op: 'deck', pluginId, pluginVersion });
+    if (result?.kind !== 'bytes') throw new Error('unexpected plugin response');
+    return result.value;
+  }
+
+  /**
    * Encodes a move the way this game's rules define.
    *
    * The UI describes moves in its own terms; the plugin owns the bytes, because
@@ -191,6 +203,19 @@ export class PluginHost {
       json: JSON.stringify(move),
     });
     if (result?.kind !== 'bytes') throw new Error('unexpected plugin response');
+    return result.value;
+  }
+
+  /**
+   * Renders an encoded move back as JSON.
+   *
+   * The host needs this to find the deal payload an entry carried: the bytes
+   * are the plugin's format, and reading them anywhere else would be a second
+   * decoder to keep in step with the first.
+   */
+  async decodeMove(pluginId: string, pluginVersion: number, move: Uint8Array): Promise<string> {
+    const result = await this.call({ op: 'decodeMove', pluginId, pluginVersion, move });
+    if (result?.kind !== 'string') throw new Error('unexpected plugin response');
     return result.value;
   }
 

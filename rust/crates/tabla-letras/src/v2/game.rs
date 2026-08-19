@@ -277,9 +277,13 @@ impl State {
         self.pending[them].min(self.deck.saturating_sub(self.pointer))
     }
 
-    /// Positions this player must open when the game ends.
+    /// Positions this player must open now the game is ending.
+    ///
+    /// Empty until it is, and empty once they have: a rack is opened exactly
+    /// once, at the end, for the closing adjustment. Playing a tile opens that
+    /// tile, which is a different thing and belongs to the move that spends it.
     pub fn to_open(&self, player: PlayerId) -> Vec<u16> {
-        if self.opened[player as usize] {
+        if !self.ending || self.opened[player as usize] {
             return Vec::new();
         }
         self.racks[player as usize].clone()

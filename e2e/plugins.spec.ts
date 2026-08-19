@@ -11,7 +11,8 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { inviteLink, startGame } from './helpers.ts';
 
-const MODULE = '/plugins/letras-v1.wasm';
+/** The rules a new game gets. Older versions stay served for games in progress. */
+const MODULE = '/plugins/letras-v2.wasm';
 const DICTIONARY = '/dict/en-v1.dawg';
 
 /** Every plugin file this page has asked the network for. */
@@ -83,7 +84,7 @@ test('a downloaded game can be removed and comes back on its own', async ({ brow
 
   // Settings knows what is here and how much room it takes.
   await a.goto('/settings');
-  const entry = a.locator('li[data-plugin="letras"]');
+  const entry = a.locator('li[data-plugin="letras"][data-version="2"]');
   await expect(entry).toContainText('on this device');
   await expect(entry.locator('.size')).not.toHaveAttribute('data-size', '0');
 

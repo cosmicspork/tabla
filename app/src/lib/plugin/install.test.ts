@@ -40,15 +40,23 @@ const letras = manifest.plugins.find(
   (plugin) => plugin.id === 'letras' && plugin.version === LETRAS_VERSION,
 )!;
 
-/** The real committed files, so the hashes under test are the real ones. */
+/**
+ * The real committed files, so the hashes under test are the real ones.
+ *
+ * Every version the manifest lists, not just the current one — older modules
+ * are still served, because games in progress are still fetching them.
+ */
 const files = new Map<string, Uint8Array>();
-for (const file of [letras.module, ...letras.assets]) {
-  files.set(
-    file.path,
-    new Uint8Array(
-      await readFile(fileURLToPath(new URL(`../../../static${file.path}`, import.meta.url))),
-    ),
-  );
+for (const plugin of manifest.plugins) {
+  for (const file of [plugin.module, ...plugin.assets]) {
+    if (files.has(file.path)) continue;
+    files.set(
+      file.path,
+      new Uint8Array(
+        await readFile(fileURLToPath(new URL(`../../../static${file.path}`, import.meta.url))),
+      ),
+    );
+  }
 }
 
 let served: (path: string) => Response;
@@ -219,6 +227,23 @@ describe('what a device is holding', () => {
 
     expect(requests).toHaveLength(1 + letras.assets.length);
     expect(await installedState('letras', LETRAS_VERSION)).toMatchObject({ installed: true });
+  });
+
+  it('keeps two versions of one game apart', async () => {
+    // Both versions ship, because a game keeps the rules it started with. Their
+    // modules are different downloads; their word list is the same bytes under
+    // both, and removing one version must not take it from the other.
+    await installPlugin('letras', 1);
+    await installPlugin('letras', 2);
+
+    expect(await installedState('letras', 1)).toMatchObject({ installed: true });
+    expect(await installedState('letras', 2)).toMatchObject({ installed: true });
+
+    await removePlugin('letras', 1);
+
+    expect(await installedState('letras', 1)).toMatchObject({ installed: false });
+    // Still whole: the shared word list stayed because version 2 still needs it.
+    expect(await installedState('letras', 2)).toMatchObject({ installed: true });
   });
 
   it('re-downloads a file the device dropped, which is what eviction looks like', async () => {

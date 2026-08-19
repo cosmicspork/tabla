@@ -37,6 +37,29 @@ export function available_plugins() {
 }
 
 /**
+ * The deck a game with hidden state is dealt from, in canonical order.
+ *
+ * Empty for a game that has none. This is public information — the same list
+ * on both devices, which is exactly why establishing the deck costs no log
+ * entries — and it lives with the rules because the rules are what define it.
+ * The host needs it to set up the deal, which happens on the other side of
+ * this boundary, where the keys are.
+ * @param {string} plugin_id
+ * @returns {Uint8Array}
+ */
+export function deck(plugin_id) {
+  const ptr0 = passStringToWasm0(plugin_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+  const len0 = WASM_VECTOR_LEN;
+  const ret = wasm.deck(ptr0, len0);
+  if (ret[3]) {
+    throw takeFromExternrefTable0(ret[2]);
+  }
+  var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+  wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+  return v2;
+}
+
+/**
  * Renders an encoded move back as JSON.
  * @param {string} plugin_id
  * @param {Uint8Array} bytes

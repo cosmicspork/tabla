@@ -30,7 +30,9 @@ export interface PluginView {
 export type PluginRequest = { id: number } & (
   | { op: 'availablePlugins' }
   | { op: 'pluginVersion'; pluginId: string; pluginVersion: number }
+  | { op: 'deck'; pluginId: string; pluginVersion: number }
   | { op: 'encodeMove'; pluginId: string; pluginVersion: number; json: string }
+  | { op: 'decodeMove'; pluginId: string; pluginVersion: number; move: Uint8Array }
   | { op: 'provideAsset'; hash: string; bytes: Uint8Array }
   | { op: 'provideModule'; pluginId: string; pluginVersion: number; bytes: Uint8Array }
   | {
@@ -92,6 +94,7 @@ export type PluginResult =
   | { kind: 'number'; value: number }
   | { kind: 'strings'; value: string[] }
   | { kind: 'bytes'; value: Uint8Array }
+  | { kind: 'string'; value: string }
   | { kind: 'view'; value: PluginView };
 
 export interface PluginResponse {

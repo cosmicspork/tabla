@@ -6,8 +6,8 @@
       "version": 2,
       "module": {
         "path": "/plugins/letras-v2.wasm",
-        "sha256": "cf73235dcdabcc5a1b316e4c611b429499fdd25e0c32ba15b1b12ede2d35e960",
-        "bytes": 197037
+        "sha256": "5db50d48b26cf4c513370fc5d8c62855092d84f21ada253d59640114f303f689",
+        "bytes": 197791
       },
       "assets": [
         {

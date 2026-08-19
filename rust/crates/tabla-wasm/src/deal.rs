@@ -175,6 +175,14 @@ impl DealSession {
         self.inner.ready()
     }
 
+    /// Whether publishing our key share now would let us shuffle in the same
+    /// entry — true for the second player to speak, whose key completes the
+    /// joint one. Saves the ceremony an entry, and an entry is a turn.
+    #[wasm_bindgen(getter, js_name = readyForShuffleAfterKey)]
+    pub fn ready_for_shuffle_after_key(&self) -> bool {
+        self.inner.ready_for_shuffle_after_key()
+    }
+
     /// How many tiles have never been dealt.
     #[wasm_bindgen(getter)]
     pub fn remaining(&self) -> usize {

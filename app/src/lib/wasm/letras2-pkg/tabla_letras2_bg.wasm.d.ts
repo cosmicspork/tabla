@@ -12,6 +12,7 @@ export const apply_move: (
   h: number,
 ) => [number, number, number, number];
 export const available_plugins: () => [number, number];
+export const deck: (a: number, b: number) => [number, number, number, number];
 export const decodeMove: (
   a: number,
   b: number,

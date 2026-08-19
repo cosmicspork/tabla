@@ -7,11 +7,13 @@
  */
 import { fromBase64Url, toBase64Url } from '@tabla/shared';
 
+import { Deal, type DealDuty } from './deal.ts';
 import { appendEntries, loadEntries, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { dictionaryBytes } from './dict.ts';
 import { pluginBytes } from './plugin/install.ts';
+import { gameEntry } from './registry.ts';
 import { pluginHost } from './plugin/host.ts';
 import type { PluginOutcome } from './plugin/protocol.ts';
 import { openGameSocket } from './relay.ts';
@@ -48,6 +50,8 @@ export interface BoardState {
 
 export class GameSession {
   private engine: SyncEngine | null = null;
+  /** Set only for games whose hidden state lives in an encrypted deck. */
+  private deal: Deal | null = null;
   private log!: Log;
   private session!: Session;
   private core!: CoreModule;
@@ -108,6 +112,96 @@ export class GameSession {
     for (const entry of await loadEntries(this.game.gameId)) {
       this.log.append(entry);
     }
+
+    const entry = gameEntry(this.game.pluginId, this.game.pluginVersion);
+    if (entry?.seed === 'deal') {
+      this.deal = await Deal.open({
+        core,
+        identity,
+        gameId: this.game.gameId,
+        player: this.player,
+        deck: await pluginHost().deck(this.game.pluginId, this.game.pluginVersion),
+        hashAt: (seq) => this.hashAt(seq),
+      });
+      await this.syncDeal();
+    }
+  }
+
+  /** The log's tip hash at a sequence, for checking a saved deal against it. */
+  private hashAt(seq: number): Uint8Array | null {
+    if (seq !== Number(this.log.tipSeq)) return null;
+    return this.log.tipHash ?? null;
+  }
+
+  /**
+   * Brings the deal up to the log's tip, verifying whatever is new.
+   *
+   * Every proof in every entry is checked here and nowhere else. A failure is
+   * an entry we refuse: the deal keeps the state it had, and the game carries
+   * on from where it was rather than half-advancing into something neither
+   * device would agree about.
+   */
+  private async syncDeal(): Promise<void> {
+    if (!this.deal) return;
+    if (Number(this.log.tipSeq) <= this.dealSyncedTo) return;
+
+    const replay = this.log.replay(this.session);
+    const moves = [...replay.moves];
+
+    // Serially: the first decode may have to fetch the rules module, and a
+    // burst of concurrent requests would each try to supply it.
+    const entries = [];
+    for (const [index, move] of moves.entries()) {
+      // Moves start at sequence 2, after the claimer's join and the setup.
+      const seq = index + 2;
+      entries.push({
+        seq,
+        author: index % 2,
+        deal: await this.dealPayloadOf(seq, move),
+      });
+    }
+
+    const tip = Number(this.log.tipSeq);
+    await this.deal.advance(entries, { seq: tip, hash: this.log.tipHash ?? null });
+    this.dealSyncedTo = tip;
+  }
+
+  /** The log tip the deal has already been brought up to. */
+  private dealSyncedTo = -1;
+
+  /**
+   * Decoded deal payloads, by sequence.
+   *
+   * Entries are immutable once written, so a payload read out of one is worth
+   * keeping: without this, every render would decode every move again through
+   * the worker.
+   */
+  private readonly payloads = new Map<number, Uint8Array | null>();
+
+  /**
+   * The deal payload carried by an encoded move, if it has one.
+   *
+   * Deliberately not forgiving. A move this device cannot read is a move it
+   * cannot verify, and quietly treating it as carrying nothing would leave the
+   * deal a step behind the log — where every later proof fails against a deck
+   * that has moved on without it.
+   */
+  private async dealPayloadOf(seq: number, move: Uint8Array): Promise<Uint8Array | null> {
+    const cached = this.payloads.get(seq);
+    if (cached !== undefined) return cached;
+
+    const decoded = JSON.parse(
+      await pluginHost().decodeMove(this.game.pluginId, this.game.pluginVersion, move),
+    ) as { deal?: number[] | null };
+
+    const payload = decoded.deal ? new Uint8Array(decoded.deal) : null;
+    this.payloads.set(seq, payload);
+    return payload;
+  }
+
+  /** What this device knows privately: a deal's opened tiles, or its seed. */
+  private privateBytes(): Uint8Array {
+    return this.deal ? this.deal.privateBlob() : fromBase64Url(this.game.seed);
   }
 
   // -- syncing --------------------------------------------------------------
@@ -196,9 +290,10 @@ export class GameSession {
     if (!this.game.dictionary) return new Uint8Array();
 
     // Version byte, then the hash of the word list both players agreed to.
+    // The version is the rules' config format, which moves with the rules.
     const hash = this.game.dictionary;
     const config = new Uint8Array(1 + hash.length / 2);
-    config[0] = 1;
+    config[0] = this.game.pluginVersion;
     for (let i = 0; i < hash.length / 2; i += 1) {
       config[i + 1] = Number.parseInt(hash.slice(i * 2, i * 2 + 2), 16);
     }
@@ -215,10 +310,14 @@ export class GameSession {
   async play(move: unknown): Promise<void> {
     const replay = this.log.replay(this.session);
     const moves = [...replay.moves];
+    const seq = Number(this.log.tipSeq) + 1;
+
+    const complete = this.wrap(move, seq);
+
     const encoded = await pluginHost().encodeMove(
       this.game.pluginId,
       this.game.pluginVersion,
-      move,
+      complete,
     );
 
     const config = replay.config ?? new Uint8Array();
@@ -226,17 +325,92 @@ export class GameSession {
       pluginId: this.game.pluginId,
       pluginVersion: this.game.pluginVersion,
       config,
-      seed: fromBase64Url(this.game.seed),
+      seed: this.privateBytes(),
       moves,
       move: encoded,
       player: this.player,
       assetHash: assetHashOf(config),
     });
 
-    const seq = Number(this.log.tipSeq) + 1;
     this.appendEntry(this.session.sealMove(seq, randomBytes(24), encoded));
     await this.persistAndNotify();
   }
+
+  /**
+   * What the last rendered view said the next entry has to carry.
+   *
+   * The rules work this out and the client supplies it: how many tiles to deal,
+   * which positions to open, and — for the older rules — the rack commitment
+   * they expect back verbatim.
+   */
+  private duty: DealDuty & { rackCommitment: unknown } = {
+    owed: 0,
+    reveal: [],
+    rackCommitment: null,
+  };
+
+  /**
+   * Wraps a game action in whatever else its rules want carried.
+   *
+   * Kept here rather than in the board because it is bookkeeping, not play, and
+   * because what a move needs alongside the action differs by version — a
+   * board that had to know would have to be rewritten for each.
+   */
+  private wrap(move: unknown, seq: number): unknown {
+    const entry = gameEntry(this.game.pluginId, this.game.pluginVersion);
+    const action = (move as { action?: unknown }).action ?? move;
+
+    if (entry?.seed === 'deal') {
+      // What a move has to open comes from the move itself — the tiles it
+      // spends — while what it has to deal comes from the rules. The closing
+      // rack is the one case the rules name, because nothing is being spent.
+      const duty = {
+        owed: this.duty.owed,
+        reveal: opened(action, this.duty.reveal),
+      };
+      const payload = this.deal?.payload(seq, duty) ?? null;
+      return { action, deal: payload ? [...payload] : null };
+    }
+
+    if (entry?.seed === 'draw') {
+      // The nonce keys the opponent's next draw, so it has to be real
+      // randomness — anything predictable would hand them their tiles early.
+      return {
+        nonce: [...randomBytes(24)],
+        rackCommitment: this.duty.rackCommitment ?? null,
+        action,
+      };
+    }
+
+    return move;
+  }
+
+  /**
+   * Submits the move the rules asked for on the player's behalf.
+   *
+   * Key shares, shuffles, dealing, forfeits and the closing openings are
+   * protocol rather than play. Driven from here and keyed on the log position
+   * rather than on what the move says, because the same move can legitimately
+   * come round again — two forfeits in one game are identical, and suppressing
+   * the second would wedge the game.
+   */
+  private async driveAutomatic(board: BoardState): Promise<void> {
+    const auto = board.view.auto;
+    if (!auto || !board.view.yourTurn || board.outcome) return;
+
+    const at = Number(this.log.tipSeq);
+    if (at === this.lastAutoAt) return;
+    this.lastAutoAt = at;
+
+    try {
+      await this.play(auto);
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** The log position the last automatic move was made at. */
+  private lastAutoAt = -1;
 
   async resign(): Promise<void> {
     const seq = Number(this.log.tipSeq) + 1;
@@ -272,6 +446,12 @@ export class GameSession {
     // Until both have arrived there is no configured game to show.
     if (Number(this.log.tipSeq) < 1) return waiting;
 
+    // Before anything reads the deal. Renders are triggered from several
+    // places — new entries, sync status, the opponent arriving — and a board
+    // drawn from a deal that has not caught up would be a board the game has
+    // already moved past. Cheap when there is nothing new.
+    await this.syncDeal();
+
     const replay = this.log.replay(this.session);
 
     const config = replay.config ?? new Uint8Array();
@@ -279,11 +459,18 @@ export class GameSession {
       pluginId: this.game.pluginId,
       pluginVersion: this.game.pluginVersion,
       config,
-      seed: fromBase64Url(this.game.seed),
+      seed: this.privateBytes(),
       moves: [...replay.moves],
       player: this.player,
       assetHash: assetHashOf(config),
     });
+
+    // Remember what the rules want of the next entry, so `play` can build it.
+    this.duty = {
+      owed: typeof view.owed === 'number' ? view.owed : 0,
+      reveal: Array.isArray(view.toOpen) ? (view.toOpen as number[]) : [],
+      rackCommitment: view.rackCommitment ?? null,
+    };
 
     // A resignation ends the game even though the rules know nothing about it.
     const resignedBy = replay.resignedBy;
@@ -313,6 +500,10 @@ export class GameSession {
     if (this.listeners.size === 0) return;
     const state = await this.board();
     for (const listener of this.listeners) listener(state);
+
+    // After the render, so the board a player is looking at is never a
+    // position the game has already moved past.
+    await this.driveAutomatic(state);
   }
 
   /** Mirrors the in-memory log into storage, then re-renders. */
@@ -366,9 +557,35 @@ export class GameSession {
  * to when the invite was made.
  */
 function assetHashOf(config: Uint8Array): string | undefined {
-  if (config.length !== 33 || config[0] !== 1) return undefined;
+  // Any config version this build knows: the first byte names the rules'
+  // format, and every one of them so far is a hash in the same place.
+  if (config.length !== 33 || config[0] < 1 || config[0] > 2) return undefined;
 
   return [...config.slice(1)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * The deck positions a move makes public.
+ *
+ * A play opens the tiles it puts down; opening a rack at the end names its own.
+ * Anything else opens nothing, and reading that off the action rather than off
+ * the board state is what keeps the payload matched to the move it travels with.
+ */
+function opened(action: unknown, ending: number[]): number[] {
+  const named = action as {
+    place?: { placements?: { position?: number }[] };
+    openRack?: { tiles?: [number, number][] };
+  };
+
+  if (named.place?.placements) {
+    return named.place.placements
+      .map((placement) => placement.position)
+      .filter((position): position is number => typeof position === 'number');
+  }
+
+  if (named.openRack?.tiles) return named.openRack.tiles.map(([position]) => position);
+
+  return ending;
 }
 
 export function describeOutcome(outcome: PluginOutcome, player: number): string {

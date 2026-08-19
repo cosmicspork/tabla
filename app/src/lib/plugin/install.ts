@@ -100,11 +100,13 @@ export async function installPlugin(pluginId: string, version: number): Promise<
 
 export async function installedState(pluginId: string, version: number): Promise<InstalledState> {
   const entry = await entryFor(pluginId, version);
-  const key = pluginKey(pluginId, version);
-  const held = new Map((await blobsForPlugin(key)).map((row) => [row.sha256, row]));
-
   const files = [entry.module, ...entry.assets];
-  const stored = files.filter((file) => held.has(file.sha256));
+
+  // By hash, not by which version fetched it. Two versions of a game share
+  // their word list, and whichever downloaded it first owns the row — but the
+  // bytes are there for both, which is the only question being asked here.
+  const present = await Promise.all(files.map((file) => getBlob(file.sha256)));
+  const stored = files.filter((_, index) => present[index] !== undefined);
 
   return {
     pluginId,
