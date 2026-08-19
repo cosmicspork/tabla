@@ -134,13 +134,19 @@ fmt:
     cd rust && cargo fmt
     bun run --cwd app format
 
-check:
+check: check-rust check-ts
+
+# Formatting, lints, and the per-game build matrix.
+check-rust:
     cd rust && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings
     # Each game must also build on its own: a downloadable plugin module is the
     # same crate with one game selected, so a game that only compiles alongside
     # its neighbours would break that build and nothing else would notice.
     cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features tictactoe
     cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features letras
+
+# Type-checking for the app. Needs the WASM output, so run `just build` first.
+check-ts:
     cd app && bun run check
 
 # Deploy the Worker and static assets to Cloudflare
