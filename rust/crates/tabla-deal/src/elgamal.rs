@@ -24,7 +24,7 @@ use zeroize::Zeroize;
 use crate::{
     CIPHERTEXT_LEN, DealError, POINT_LEN, Transcript,
     encoding::{point_from_bytes, scalar_from_bytes},
-    proofs::EqualityProof,
+    proofs::{EqualityProof, KnowledgeProof},
 };
 
 /// One player's secret contribution to the joint key.
@@ -65,6 +65,15 @@ impl KeyShare {
     /// without the proof that comes with it.
     pub fn decryption_share(&self, ciphertext: &Ciphertext) -> RistrettoPoint {
         ciphertext.c1 * self.secret
+    }
+
+    /// Proof that this share's public half is one we can actually open.
+    ///
+    /// Published alongside the share itself. Without it a player could name a
+    /// public key chosen so that the *sum* of the two lands wherever they like,
+    /// and control a deck both players believe is jointly keyed.
+    pub fn prove_knowledge(&self, transcript: &mut Transcript, entropy: &[u8]) -> KnowledgeProof {
+        KnowledgeProof::prove(transcript, &self.secret, entropy)
     }
 
     /// A decryption share together with the proof that it is the right one.
