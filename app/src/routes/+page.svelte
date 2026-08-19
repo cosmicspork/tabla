@@ -5,10 +5,12 @@
   import type { GameRecord } from '$lib/db/schema.ts';
   import { createGame, refreshPendingGame } from '$lib/games.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
+  import { availableGames, titleOf } from '$lib/registry.ts';
 
   let games = $state<GameRecord[]>([]);
   let publicKey = $state('');
-  let creating = $state(false);
+  let creating = $state<string | null>(null);
+  let picking = $state(false);
   let failure = $state<string | null>(null);
 
   async function refresh() {
@@ -27,16 +29,17 @@
     void refresh();
   });
 
-  async function newGame() {
-    creating = true;
+  async function newGame(pluginId: string) {
+    creating = pluginId;
     failure = null;
     try {
-      const { game } = await createGame(location.origin);
+      const { game } = await createGame(location.origin, pluginId);
       await goto(`/g/${encodeURIComponent(game.gameId)}`);
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     } finally {
-      creating = false;
+      creating = null;
+      picking = false;
     }
   }
 
@@ -44,7 +47,7 @@
     if (game.status === 'pending') return 'Waiting for someone to join';
     if (game.status === 'incompatible') return 'Needs a newer version of tabla';
     if (game.status === 'finished') return game.outcome ?? 'Finished';
-    return game.role === 'initiator' ? 'You are X' : 'You are O';
+    return game.role === 'initiator' ? 'You started this one' : 'They invited you';
   }
 </script>
 
@@ -55,9 +58,27 @@
 {/if}
 
 <div class="stack">
-  <button class="primary" onclick={newGame} disabled={creating}>
-    {creating ? 'Creating…' : 'Start a new game'}
-  </button>
+  {#if picking}
+    <div class="card picker">
+      <h2>What would you like to play?</h2>
+      {#each availableGames() as entry (entry.id)}
+        <button
+          class="choice"
+          onclick={() => newGame(entry.id)}
+          disabled={creating !== null}
+          data-game={entry.id}
+        >
+          <span class="title">{entry.title}</span>
+          <span class="muted">{creating === entry.id ? 'Creating…' : entry.blurb}</span>
+        </button>
+      {/each}
+      <button class="ghost" onclick={() => (picking = false)} disabled={creating !== null}>
+        Never mind
+      </button>
+    </div>
+  {:else}
+    <button class="primary" onclick={() => (picking = true)}>Start a new game</button>
+  {/if}
 
   {#if games.length === 0}
     <div class="card">
@@ -72,7 +93,7 @@
       {#each games as game (game.gameId)}
         <li>
           <a class="card game" href="/g/{encodeURIComponent(game.gameId)}">
-            <span class="title">Tic tac toe</span>
+            <span class="title">{titleOf(game.pluginId)}</span>
             <span class="muted">{label(game)}</span>
           </a>
         </li>
@@ -111,6 +132,28 @@
 
   .title {
     font-weight: 550;
+  }
+
+  .picker {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .choice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+    text-align: left;
+    width: 100%;
+  }
+
+  .ghost {
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 0.9rem;
+    padding: 0.25rem;
   }
 
   footer {

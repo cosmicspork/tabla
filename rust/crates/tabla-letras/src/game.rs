@@ -63,8 +63,12 @@ pub struct Move {
 
 /// Externally tagged, because the wire encoding is not self-describing and an
 /// internally tagged enum cannot be read back out of it.
+///
+/// Field names are camel-cased for the UI's benefit. That changes only the JSON
+/// spelling: postcard encodes fields by position, so the bytes signed into the
+/// log are unaffected.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Action {
     /// Opens the game. `toss` is a commitment to the initiator's half of the
     /// first-player draw, and the claimer's half in the clear — the claimer
@@ -853,6 +857,7 @@ impl GamePlugin for Letras {
                     .map(|finding| finding.map(|f| f.describe().to_string())),
             }),
             rack_commitment: state.owed_commitment(),
+            exchange_mask: exchange_mask(&state.seed, state.my_exchanges, RACK),
             auto: automatic(state, me),
         }
     }
@@ -956,6 +961,14 @@ pub struct View {
     /// The commitment this player's next entry must carry, to be passed back
     /// verbatim.
     pub rack_commitment: Option<Hash>,
+    /// Keystream for this player's next exchange, one byte per rack slot.
+    ///
+    /// Which tiles a player throws back is their own business until the reveal,
+    /// so it goes into the log masked. The rules cannot do the masking
+    /// themselves — they do not know what the player will choose — so they hand
+    /// over the keystream and the client XORs its own choice with it. It is
+    /// derived from this player's seed and therefore worthless to anyone else.
+    pub exchange_mask: Vec<u8>,
     /// A move the client should make on its own.
     pub auto: Option<Action>,
 }

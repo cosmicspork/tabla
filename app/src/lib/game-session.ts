@@ -10,6 +10,7 @@ import { fromBase64Url, toBase64Url } from '@tabla/shared';
 import { appendEntries, loadEntries, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
+import { dictionaryBytes } from './dict.ts';
 import { pluginHost } from './plugin/host.ts';
 import type { PluginOutcome } from './plugin/protocol.ts';
 import { openGameSocket } from './relay.ts';
@@ -60,6 +61,10 @@ export class GameSession {
   }
 
   private async initialize(): Promise<void> {
+    // The sandbox cannot fetch anything, so the main thread supplies the word
+    // list when the rules ask for it.
+    pluginHost().useAssetSource(dictionaryBytes);
+
     const { core, identity } = await loadIdentity();
     this.core = core;
     this.identity = identity;
@@ -152,10 +157,30 @@ export class GameSession {
       return true;
     }
     if (tip === 0 && this.game.role === 'initiator') {
-      this.appendEntry(this.session.sealSetup(randomBytes(24), new Uint8Array()));
+      this.appendEntry(this.session.sealSetup(randomBytes(24), this.setupConfig()));
       return true;
     }
     return false;
+  }
+
+  /**
+   * The configuration the initiator writes into the log at sequence 1.
+   *
+   * It repeats what the invite already said, which is the point: the invite is
+   * out of band and gone once redeemed, while this is inside the signed log and
+   * verifiable for as long as the game exists.
+   */
+  private setupConfig(): Uint8Array {
+    if (!this.game.dictionary) return new Uint8Array();
+
+    // Version byte, then the hash of the word list both players agreed to.
+    const hash = this.game.dictionary;
+    const config = new Uint8Array(1 + hash.length / 2);
+    config[0] = 1;
+    for (let i = 0; i < hash.length / 2; i += 1) {
+      config[i + 1] = Number.parseInt(hash.slice(i * 2, i * 2 + 2), 16);
+    }
+    return config;
   }
 
   /**
@@ -177,6 +202,7 @@ export class GameSession {
       moves,
       move: encoded,
       player: this.player,
+      assetHash: this.game.dictionary,
     });
 
     const seq = Number(this.log.tipSeq) + 1;
@@ -212,6 +238,7 @@ export class GameSession {
       seed: fromBase64Url(this.game.seed),
       moves: [...replay.moves],
       player: this.player,
+      assetHash: this.game.dictionary,
     });
 
     // A resignation ends the game even though the rules know nothing about it.

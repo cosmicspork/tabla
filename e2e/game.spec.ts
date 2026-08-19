@@ -7,6 +7,8 @@
  */
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
+import { startGame } from './helpers.ts';
+
 /** A fresh profile: its own IndexedDB, so its own identity keypair. */
 async function newPlayer(context: BrowserContext): Promise<Page> {
   const page = await context.newPage();
@@ -38,7 +40,7 @@ test('two players complete a game through the relay', async ({ browser }) => {
   const b = await newPlayer(bob);
 
   // Alice starts a game and gets a single-use link.
-  await a.getByRole('button', { name: 'Start a new game' }).click();
+  await startGame(a);
   const link = await readInviteLink(a);
   expect(link).toContain('/j#');
 
@@ -82,7 +84,7 @@ test('an invite link can only be used once', async ({ browser }) => {
   const carol = await browser.newContext();
 
   const a = await newPlayer(alice);
-  await a.getByRole('button', { name: 'Start a new game' }).click();
+  await startGame(a);
   const link = await readInviteLink(a);
 
   const b = await newPlayer(bob);
@@ -105,7 +107,7 @@ test('a game survives the relay losing its copy', async ({ browser, request }) =
   const bob = await browser.newContext();
 
   const a = await newPlayer(alice);
-  await a.getByRole('button', { name: 'Start a new game' }).click();
+  await startGame(a);
   const link = await readInviteLink(a);
   const gameId = new URL(a.url()).pathname.split('/').pop()!;
 

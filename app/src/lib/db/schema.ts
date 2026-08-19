@@ -39,8 +39,17 @@ export interface GameRecord {
   /** base64url public keys. The claimer's is unknown until the invite is taken. */
   initiatorPubKey: string;
   claimerPubKey?: string;
-  /** Entropy from the invite, handed to the plugin's setup. */
+  /**
+   * Entropy handed to the plugin's setup.
+   *
+   * For most games this is the value the invite carried, identical on both
+   * devices. A game with hidden state instead derives its own from the identity
+   * key, so the two players hold different secrets — which is what stops either
+   * of them working out the other's tiles. See `registry.ts`.
+   */
   seed: string;
+  /** Hex hash of the word list this game agreed to, for games that read one. */
+  dictionary?: string;
   status: GameStatus;
   createdAt: number;
   lastActivity: number;

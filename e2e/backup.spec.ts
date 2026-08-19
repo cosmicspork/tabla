@@ -8,6 +8,8 @@
  */
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
+import { startGame } from './helpers.ts';
+
 const PASSPHRASE = 'correct horse battery staple';
 
 async function newPlayer(context: BrowserContext): Promise<Page> {
@@ -30,7 +32,7 @@ async function playedGame(browser: BrowserContext['browser']) {
   const bob = await browser!.newContext();
 
   const a = await newPlayer(alice);
-  await a.getByRole('button', { name: 'Start a new game' }).click();
+  await startGame(a);
   const link = await inviteLink(a);
 
   const b = await newPlayer(bob);

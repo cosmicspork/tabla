@@ -1,7 +1,8 @@
 <script lang="ts">
   import { page } from '$app/state';
 
-  import Board from '$lib/components/Board.svelte';
+  import type { Component } from 'svelte';
+
   import InviteShare from '$lib/components/InviteShare.svelte';
   import NotifyPrompt from '$lib/components/NotifyPrompt.svelte';
   import { getGame } from '$lib/db/store.ts';
@@ -10,6 +11,7 @@
   import { refreshPendingGame } from '$lib/games.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
   import { currentSubscription } from '$lib/push.ts';
+  import { gameEntry, titleOf, type BoardProps } from '$lib/registry.ts';
   import type { PushSubscriptionJson } from '@tabla/shared';
 
   const gameId = $derived(decodeURIComponent(page.params.gameId ?? ''));
@@ -17,6 +19,7 @@
   let game = $state<GameRecord | null>(null);
   let session = $state<GameSession | null>(null);
   let board = $state<BoardState | null>(null);
+  let Board = $state<Component<BoardProps> | null>(null);
   let failure = $state<string | null>(null);
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -71,6 +74,13 @@
 
   async function play(record: GameRecord) {
     try {
+      // Boards are per-game and loaded on demand, so a build with a dozen games
+      // does not ship a dozen boards to someone playing one of them. This lives
+      // here rather than at the top of `start` because a game that began as a
+      // pending invite arrives by the other path.
+      const entry = gameEntry(record.pluginId);
+      if (entry) Board = (await entry.board()).default;
+
       const opened = await GameSession.open(record);
       session = opened;
 
@@ -90,9 +100,9 @@
     }
   }
 
-  async function onplay(cell: number) {
+  async function onplay(move: unknown) {
     try {
-      await session?.play({ cell });
+      await session?.play(move);
     } catch (error) {
       // Rejected by the rules, so it was never written to the log.
       failure = error instanceof Error ? error.message : String(error);
@@ -143,8 +153,8 @@
     the two of you disagreeing about legal moves partway through, which cannot be repaired — so it
     is refused up front.
   </p>
-{:else if board}
-  <h1>Tic tac toe</h1>
+{:else if board && Board}
+  <h1>{titleOf(game?.pluginId ?? '')}</h1>
   <p class="status">{statusLine}</p>
 
   <Board {board} {onplay} />

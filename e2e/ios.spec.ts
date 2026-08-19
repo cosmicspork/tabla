@@ -11,6 +11,8 @@
  */
 import { devices, expect, test, type Browser, type Page } from '@playwright/test';
 
+import { startGame } from './helpers.ts';
+
 /**
  * iPhone characteristics only. The full device descriptor carries
  * `defaultBrowserType`, which Playwright refuses inside a file that also runs
@@ -31,7 +33,7 @@ async function gameOnIphone(browser: Browser, startUrl: string) {
 
   const a = await host.newPage();
   await a.goto(startUrl);
-  await a.getByRole('button', { name: 'Start a new game' }).click();
+  await startGame(a);
   // Wait for the invite to render before reading it out.
   await expect(a.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
 
@@ -92,7 +94,7 @@ test('permission is never requested without a tap', async ({ browser }) => {
   });
 
   await page.goto('/?simulate=ios-standalone');
-  await page.getByRole('button', { name: 'Start a new game' }).click();
+  await startGame(page);
   await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
 
   // The app has loaded, created a game, and rendered — and still not asked.

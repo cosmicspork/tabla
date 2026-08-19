@@ -1,19 +1,13 @@
 /**
  * Creating and joining games: the invite protocol as the app performs it.
  */
-import {
-  BLOB_ID_LEN,
-  CORE_PLUGIN_ID,
-  CORE_PLUGIN_VERSION,
-  GAME_ID_LEN,
-  fromBase64Url,
-  toBase64Url,
-} from '@tabla/shared';
+import { BLOB_ID_LEN, CORE_PLUGIN_ID, GAME_ID_LEN, fromBase64Url, toBase64Url } from '@tabla/shared';
 
 import { getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { requestPersistentStorage } from './lifecycle.ts';
+import { gameEntry } from './registry.ts';
 import { claimInvite, createInvite, inviteStatus } from './relay.ts';
 
 export interface CreatedInvite {
@@ -28,24 +22,41 @@ export interface CreatedInvite {
  * The blob key is random and lives only in the URL fragment: the relay stores a
  * blob it cannot read, and link-preview crawlers that fetch a pasted URL learn
  * nothing, because fragments are never transmitted.
+ *
+ * The invite names the game, its rules version, and — for a game that reads a
+ * word list — which word list. All three have to match on the other side or the
+ * two clients would be playing subtly different games; the check is in
+ * `isCompatible`, and it is why the claimer can refuse before playing a move.
  */
-export async function createGame(origin: string): Promise<CreatedInvite> {
+export async function createGame(
+  origin: string,
+  pluginId: string = CORE_PLUGIN_ID,
+): Promise<CreatedInvite> {
+  const entry = gameEntry(pluginId);
+  if (!entry) throw new Error(`unknown game: ${pluginId}`);
+
   const { core, identity } = await loadIdentity();
 
   const gameId = randomBytes(GAME_ID_LEN);
   const blobKey = randomBytes(32);
-  const seed = randomBytes(32);
+  const dictionary = entry.dictionary ? fromHex(entry.dictionary) : undefined;
   const now = Date.now();
+
+  // A game with hidden state derives its own entropy per device, so that
+  // neither player can work out the other's tiles. The invite's seed is only
+  // for games where both sides may hold the same value.
+  const seed =
+    entry.seed === 'draw' ? identity.deriveDrawSeed(gameId) : randomBytes(32);
 
   const blob = core.sealInvite(
     blobKey,
     randomBytes(24),
     gameId,
-    CORE_PLUGIN_ID,
-    CORE_PLUGIN_VERSION,
-    undefined,
+    entry.id,
+    entry.version,
+    dictionary,
     identity.publicKey(),
-    seed,
+    entry.seed === 'draw' ? randomBytes(32) : seed,
     BigInt(now),
   );
 
@@ -55,8 +66,9 @@ export async function createGame(origin: string): Promise<CreatedInvite> {
     gameId: toBase64Url(gameId),
     blobId,
     blobKey: toBase64Url(blobKey),
-    pluginId: CORE_PLUGIN_ID,
-    pluginVersion: CORE_PLUGIN_VERSION,
+    pluginId: entry.id,
+    pluginVersion: entry.version,
+    dictionary: entry.dictionary,
     role: 'initiator',
     initiatorPubKey: toBase64Url(identity.publicKey()),
     seed: toBase64Url(seed),
@@ -127,22 +139,32 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
 
   const invite = core.openInvite(key, fromBase64Url(blob));
   const now = Date.now();
+  const entry = gameEntry(invite.pluginId);
 
+  const dictionaryHash = invite.dictionaryHash;
   const game: GameRecord = {
     gameId: toBase64Url(invite.gameId),
     blobId,
     pluginId: invite.pluginId,
     pluginVersion: invite.pluginVersion,
+    dictionary: dictionaryHash ? toHex(dictionaryHash) : undefined,
     role: 'claimer',
     initiatorPubKey: toBase64Url(invite.initiatorPublicKey),
     claimerPubKey: toBase64Url(identity.publicKey()),
-    seed: toBase64Url(invite.seed),
+    seed:
+      entry?.seed === 'draw'
+        ? toBase64Url(identity.deriveDrawSeed(invite.gameId))
+        : toBase64Url(invite.seed),
     status: 'active',
     createdAt: now,
     lastActivity: now,
   };
 
-  if (!invite.isCompatible(CORE_PLUGIN_ID, CORE_PLUGIN_VERSION, undefined)) {
+  const compatible =
+    entry !== undefined &&
+    invite.isCompatible(entry.id, entry.version, entry.dictionary ? fromHex(entry.dictionary) : undefined);
+
+  if (!compatible) {
     await putGame({ ...game, status: 'incompatible' });
     return { ok: false, reason: 'incompatible' };
   }
@@ -185,4 +207,16 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
     blobKey: undefined,
     lastActivity: now,
   });
+}
+
+function fromHex(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.length; i += 1) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+function toHex(bytes: Uint8Array): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

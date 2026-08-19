@@ -1,12 +1,15 @@
 <script lang="ts">
   import type { BoardState } from '$lib/game-session.ts';
 
+  // `onplay` takes whatever this game's rules call a move — a cell number here.
+  // The plugin owns the encoding, so the shape has to agree with the rules and
+  // never with the relay, which sees only ciphertext either way.
   let {
     board,
     onplay,
   }: {
     board: BoardState;
-    onplay: (cell: number) => void;
+    onplay: (move: unknown) => void;
   } = $props();
 
   const marks = ['✕', '○'];
@@ -24,7 +27,7 @@
       class:won={winning.has(cell)}
       disabled={!yourTurn || !legal.has(cell)}
       aria-label={mark === null ? `Play cell ${cell + 1}` : `Cell ${cell + 1}, ${marks[mark]}`}
-      onclick={() => onplay(cell)}
+      onclick={() => onplay({ cell })}
     >
       {mark === null ? '' : marks[mark]}
     </button>

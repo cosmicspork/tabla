@@ -124,6 +124,7 @@ impl Placed {
 
 /// A tile going down this turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Placement {
     pub row: u8,
     pub col: u8,

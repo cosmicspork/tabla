@@ -1,0 +1,465 @@
+<script lang="ts">
+  import type { BoardState } from '$lib/game-session.ts';
+
+  let {
+    board,
+    onplay,
+  }: {
+    board: BoardState;
+    onplay: (move: unknown) => void;
+  } = $props();
+
+  const SIZE = 15;
+
+  /**
+   * The rules hand the board and the premium layout over as one character per
+   * square, which keeps a 225-square grid from becoming a wall of JSON on every
+   * render. `.` is empty, a lowercase letter is a tile, an uppercase one is a
+   * blank being read as that letter.
+   */
+  const played = $derived((board.view.board ?? '.'.repeat(225)) as string);
+  const premiums = $derived((board.view.premiums ?? '.'.repeat(225)) as string);
+  const rack = $derived((board.view.rack ?? '') as string);
+  const values = $derived((board.view.values ?? []) as number[]);
+  const scores = $derived((board.view.scores ?? [0, 0]) as [number, number]);
+  const finalScores = $derived(board.view.finalScores as [number, number] | undefined);
+  const you = $derived((board.view.you ?? 0) as number);
+  const phase = $derived((board.view.phase ?? 'play') as string);
+  const yourTurn = $derived(Boolean(board.view.yourTurn));
+  const bag = $derived((board.view.bag ?? 0) as number);
+  const opponentTiles = $derived((board.view.opponentTiles ?? 0) as number);
+  const canChallenge = $derived(Boolean(board.view.canChallenge));
+  const lastPlay = $derived(
+    board.view.lastPlay as { by: number; words: string[]; cells: number[]; score: number } | null,
+  );
+  const audit = $derived(board.view.audit as { ok: boolean[]; notes: (string | null)[] } | null);
+
+  /** The protocol move the rules want submitted without troubling the player. */
+  const auto = $derived(board.view.auto as unknown);
+  const rackCommitment = $derived(board.view.rackCommitment as number[] | null);
+  /**
+   * The keystream for our next exchange, from the rules.
+   *
+   * Which tiles you throw back stays yours until the reveal, so it goes into
+   * the log masked. The rules cannot mask it for us — they do not know what we
+   * will pick — so they hand over the keystream and we XOR our own choice.
+   */
+  const exchangeMask = $derived((board.view.exchangeMask ?? []) as number[]);
+
+  /** Tiles placed this turn but not yet played: `cell -> rack index`. */
+  let pending = $state<Map<number, number>>(new Map());
+  /** Which rack tile is picked up, as an index into the rack string. */
+  let held = $state<number | null>(null);
+  /** A blank waiting to be told what it stands for. */
+  let assigning = $state<number | null>(null);
+  let blankLetters = $state<Map<number, string>>(new Map());
+  let exchanging = $state(false);
+  let discards = $state<Set<number>>(new Set());
+  let busy = $state(false);
+
+  const usedRackTiles = $derived(new Set(pending.values()));
+
+  /** Whether a rack tile is spoken for by a tile already on the board. */
+  function isUsed(index: number): boolean {
+    return usedRackTiles.has(index);
+  }
+
+  function letterAt(cell: number): string {
+    const staged = pending.get(cell);
+    if (staged !== undefined) {
+      const tile = rack[staged];
+      return tile === '?' ? (blankLetters.get(cell) ?? '?').toUpperCase() : tile;
+    }
+    return played[cell] === '.' ? '' : played[cell];
+  }
+
+  function isBlank(cell: number): boolean {
+    const staged = pending.get(cell);
+    if (staged !== undefined) return rack[staged] === '?';
+    return played[cell] !== '.' && played[cell] === played[cell].toUpperCase();
+  }
+
+  function valueOf(letter: string): number {
+    if (!letter || letter !== letter.toLowerCase()) return 0;
+    return values[letter.charCodeAt(0) - 97] ?? 0;
+  }
+
+  function tapCell(cell: number) {
+    if (!yourTurn || phase !== 'play') return;
+
+    // Tapping a tile you just put down takes it back.
+    if (pending.has(cell)) {
+      pending.delete(cell);
+      blankLetters.delete(cell);
+      pending = new Map(pending);
+      blankLetters = new Map(blankLetters);
+      return;
+    }
+
+    if (held === null || played[cell] !== '.') return;
+
+    pending.set(cell, held);
+    pending = new Map(pending);
+    if (rack[held] === '?') assigning = cell;
+    held = null;
+  }
+
+  function tapRack(index: number) {
+    if (!yourTurn) return;
+
+    if (exchanging) {
+      if (discards.has(index)) discards.delete(index);
+      else discards.add(index);
+      discards = new Set(discards);
+      return;
+    }
+    held = held === index ? null : index;
+  }
+
+  function chooseBlank(letter: string) {
+    if (assigning === null) return;
+    blankLetters.set(assigning, letter);
+    blankLetters = new Map(blankLetters);
+    assigning = null;
+  }
+
+  function recall() {
+    pending = new Map();
+    blankLetters = new Map();
+    held = null;
+    assigning = null;
+  }
+
+  /** Turns the staged tiles into the placements the rules expect. */
+  function placements() {
+    return [...pending.entries()].map(([cell, index]) => ({
+      row: Math.floor(cell / SIZE),
+      col: cell % SIZE,
+      tile: rack[index] === '?' ? 0 : rack.charCodeAt(index) - 96,
+      blankAs:
+        rack[index] === '?' ? (blankLetters.get(cell) ?? 'e').charCodeAt(0) - 96 : null,
+    }));
+  }
+
+  /**
+   * Every move goes out the same way: a fresh nonce from the system generator,
+   * whatever rack commitment the rules say is owed, and the action.
+   *
+   * The nonce has to be real randomness — it keys the opponent's next draw, and
+   * anything predictable would hand them their tiles in advance.
+   */
+  async function submit(action: unknown) {
+    if (busy) return;
+    busy = true;
+    try {
+      await onplay({
+        nonce: [...crypto.getRandomValues(new Uint8Array(24))],
+        rackCommitment,
+        action,
+      });
+      recall();
+      exchanging = false;
+      discards = new Set();
+    } finally {
+      busy = false;
+    }
+  }
+
+  function play() {
+    if (pending.size === 0 || assigning !== null) return;
+    void submit({ place: { placements: placements() } });
+  }
+
+  function pass() {
+    void submit('pass');
+  }
+
+  function challenge() {
+    void submit('challenge');
+  }
+
+  function startExchange() {
+    recall();
+    exchanging = true;
+  }
+
+  function confirmExchange() {
+    const tiles = [...discards]
+      .map((i) => (rack[i] === '?' ? 0 : rack.charCodeAt(i) - 96))
+      .sort((a, b) => a - b);
+    const masked = tiles.map((tile, i) => tile ^ (exchangeMask[i] ?? 0));
+
+    void submit({ exchange: { masked } });
+  }
+
+  /**
+   * Commitments, the toss, forfeits and the final reveal are protocol rather
+   * than play. The rules work out what has to be said; the client says it.
+   */
+  $effect(() => {
+    if (auto && yourTurn && !busy) void submit(auto);
+  });
+
+  const canPlay = $derived(yourTurn && phase === 'play' && pending.size > 0 && assigning === null);
+</script>
+
+<div class="letras">
+  <div class="scoreline">
+    <span class:mine={you === 0}>You {finalScores ? finalScores[you] : scores[you]}</span>
+    <span class="muted">{bag} in the bag</span>
+    <span>Them {finalScores ? finalScores[1 - you] : scores[1 - you]}</span>
+  </div>
+
+  <div class="word-board" class:waiting={!yourTurn}>
+    {#each Array(225) as _, cell (cell)}
+      {@const letter = letterAt(cell)}
+      <button
+        class="square p{premiums[cell]}"
+        class:filled={letter !== ''}
+        class:staged={pending.has(cell)}
+        class:fresh={lastPlay?.cells?.includes(cell)}
+        class:blank={isBlank(cell)}
+        onclick={() => tapCell(cell)}
+        disabled={!yourTurn || phase !== 'play'}
+        aria-label={`row ${Math.floor(cell / SIZE) + 1} column ${(cell % SIZE) + 1}`}
+        data-cell={cell}
+      >
+        {#if letter}
+          <span class="letter">{letter.toLowerCase()}</span>
+          {#if !isBlank(cell)}<span class="pip">{valueOf(letter.toLowerCase())}</span>{/if}
+        {/if}
+      </button>
+    {/each}
+  </div>
+
+  {#if assigning !== null}
+    <div class="card chooser">
+      <p>What does the blank stand for?</p>
+      <div class="letters">
+        {#each 'abcdefghijklmnopqrstuvwxyz'.split('') as letter (letter)}
+          <button onclick={() => chooseBlank(letter)}>{letter}</button>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <div class="rack" data-rack={rack}>
+    {#each rack.split('') as tile, index (index)}
+      <button
+        class="tile"
+        class:held={held === index}
+        class:spent={isUsed(index)}
+        class:discard={discards.has(index)}
+        onclick={() => tapRack(index)}
+        disabled={!yourTurn || isUsed(index)}
+      >
+        <span class="letter">{tile === '?' ? ' ' : tile}</span>
+        {#if tile !== '?'}<span class="pip">{valueOf(tile)}</span>{/if}
+      </button>
+    {/each}
+    <span class="muted opponent">{opponentTiles} on their rack</span>
+  </div>
+
+  {#if exchanging}
+    <div class="actions">
+      <button class="primary" onclick={confirmExchange} disabled={discards.size === 0 || busy}>
+        Swap {discards.size} {discards.size === 1 ? 'tile' : 'tiles'}
+      </button>
+      <button onclick={() => ((exchanging = false), (discards = new Set()))}>Cancel</button>
+    </div>
+  {:else}
+    <div class="actions">
+      <button class="primary" onclick={play} disabled={!canPlay || busy}>Play</button>
+      {#if canChallenge}
+        <button class="challenge" onclick={challenge} disabled={busy}>Challenge</button>
+      {/if}
+      <button onclick={recall} disabled={pending.size === 0}>Recall</button>
+      <button onclick={startExchange} disabled={!yourTurn || phase !== 'play' || bag < 7 || busy}>
+        Swap
+      </button>
+      <button onclick={pass} disabled={!yourTurn || phase !== 'play' || busy}>Pass</button>
+    </div>
+  {/if}
+
+  {#if lastPlay}
+    <p class="muted last">
+      {lastPlay.by === you ? 'You played' : 'They played'}
+      {lastPlay.words.join(', ')} for {lastPlay.score}.
+      {#if canChallenge}
+        Challenge it, or take your turn to let it stand.
+      {/if}
+    </p>
+  {/if}
+
+  <p class="muted honour">
+    Words are not checked when they are played. If you think one is not real, challenge it — and
+    lose your turn if it is.
+  </p>
+
+  {#if audit}
+    <div class="card">
+      <h2>End of game check</h2>
+      {#each audit.ok as ok, player (player)}
+        <p class="muted">
+          {player === you ? 'You' : 'They'}: {ok ? 'every draw checks out' : audit.notes[player]}
+        </p>
+      {/each}
+    </div>
+  {/if}
+</div>
+
+<style>
+  .letras {
+    display: grid;
+    gap: 0.75rem;
+  }
+
+  .scoreline {
+    display: flex;
+    justify-content: space-between;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Deliberately not `.board`: that selector belongs to tic tac toe's grid. */
+  .word-board {
+    display: grid;
+    grid-template-columns: repeat(15, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    aspect-ratio: 1;
+  }
+
+  .word-board.waiting {
+    opacity: 0.85;
+  }
+
+  .square {
+    all: unset;
+    display: grid;
+    place-items: center;
+    position: relative;
+    aspect-ratio: 1;
+    background: var(--bg);
+    font-size: clamp(0.5rem, 2vw, 0.9rem);
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .square:disabled {
+    cursor: default;
+  }
+
+  /* The premium layout, straight from the rules. */
+  .square.pd {
+    background: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  }
+  .square.pt {
+    background: color-mix(in srgb, var(--accent) 30%, var(--bg));
+  }
+  .square.pD {
+    background: color-mix(in srgb, tomato 18%, var(--bg));
+  }
+  .square.pT {
+    background: color-mix(in srgb, tomato 38%, var(--bg));
+  }
+  .square.pS {
+    background: color-mix(in srgb, tomato 24%, var(--bg));
+  }
+
+  .square.filled {
+    background: #e8d7b0;
+    color: #2b2118;
+    font-weight: 600;
+  }
+
+  .square.staged {
+    background: #f5e9cd;
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .square.fresh {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  .square.blank .letter {
+    font-style: italic;
+    opacity: 0.75;
+  }
+
+  .pip {
+    position: absolute;
+    right: 1px;
+    bottom: 0;
+    font-size: 0.5em;
+    opacity: 0.7;
+  }
+
+  .rack {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+
+  .tile {
+    all: unset;
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 2.2rem;
+    height: 2.2rem;
+    background: #e8d7b0;
+    color: #2b2118;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .tile.held {
+    outline: 2px solid var(--accent);
+    transform: translateY(-3px);
+  }
+
+  .tile.discard {
+    outline: 2px solid tomato;
+  }
+
+  .tile.spent {
+    opacity: 0.3;
+    cursor: default;
+  }
+
+  .opponent {
+    margin-left: auto;
+    font-size: 0.85rem;
+  }
+
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .challenge {
+    border-color: tomato;
+  }
+
+  .chooser .letters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .chooser .letters button {
+    width: 2rem;
+    padding: 0.25rem;
+  }
+
+  .last,
+  .honour {
+    font-size: 0.85rem;
+    margin: 0;
+  }
+</style>
