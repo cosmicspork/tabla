@@ -12,6 +12,7 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import { loadCore, type CoreModule } from './core.ts';
+import { loadLetras } from './letras.ts';
 import { loadPlugin, type PluginModule } from './plugin.ts';
 
 function resolve(relative: string): string {
@@ -26,6 +27,17 @@ export function pluginWasmPath(): string {
   return resolve('./pkg/plugin/tabla_plugin_bg.wasm');
 }
 
+/**
+ * The committed downloadable module, read from where the app serves it.
+ *
+ * This is the artifact a browser fetches and hash-checks, so a test that reads
+ * it is testing the bytes players actually receive rather than a fresh build of
+ * the same source.
+ */
+export function letrasWasmPath(): string {
+  return resolve('../../../static/plugins/letras-v1.wasm');
+}
+
 export async function readCoreWasm(): Promise<Uint8Array> {
   return new Uint8Array(await readFile(coreWasmPath()));
 }
@@ -38,6 +50,14 @@ export async function loadCoreFromDisk(): Promise<CoreModule> {
   return loadCore(await readCoreWasm());
 }
 
+export async function readLetrasWasm(): Promise<Uint8Array> {
+  return new Uint8Array(await readFile(letrasWasmPath()));
+}
+
 export async function loadPluginFromDisk(): Promise<PluginModule> {
   return loadPlugin(await readPluginWasm());
+}
+
+export async function loadLetrasFromDisk(): Promise<PluginModule> {
+  return loadLetras(await readLetrasWasm());
 }

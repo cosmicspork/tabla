@@ -271,21 +271,14 @@ describe('plugin module', () => {
     }
   });
 
-  it('knows which games it can play', () => {
-    expect(plugin.available_plugins()).toEqual(['letras', 'tictactoe']);
+  it('carries only the game the app bundles', () => {
+    // One game ships with the app, so a fresh install with no network can still
+    // play something. Every other game is a module of its own — see
+    // `artifact.test.ts`, which tests the one players download.
+    expect(plugin.available_plugins()).toEqual(['tictactoe']);
     expect(plugin.plugin_version('tictactoe')).toBe(1);
-    expect(plugin.plugin_version('letras')).toBe(1);
+    expect(() => plugin.plugin_version('letras')).toThrow(/unknown plugin/);
     expect(() => plugin.plugin_version('chess')).toThrow(/unknown plugin/);
-  });
-
-  it('refuses to start a word game without the word list it was promised', async () => {
-    // The hash is pinned in the invite, so a client with the wrong dictionary
-    // is stopped before it can disagree with its opponent about a word.
-    const config = new Uint8Array([1, ...new Uint8Array(32).fill(0xab)]);
-
-    expect(() =>
-      plugin.setup('letras', config, new Uint8Array(32), new Uint8Array([1, 2, 3])),
-    ).toThrow(/game data/);
   });
 
   it('renders a starting position', () => {

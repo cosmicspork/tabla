@@ -7,6 +7,7 @@
  */
 import {
   ASSET_MISSING,
+  MODULE_MISSING,
   type PluginRequest,
   type PluginResponse,
   type PluginResult,
@@ -21,6 +22,9 @@ import {
  * the sandbox's own inability to fetch stays the only fetching story.
  */
 export type AssetSource = (hash: string) => Promise<Uint8Array>;
+
+/** The same arrangement for a game's rules, which are also fetched and checked. */
+export type ModuleSource = (pluginId: string) => Promise<Uint8Array>;
 
 /**
  * `Omit` over a union keeps only the keys every member shares, which would drop
@@ -69,12 +73,18 @@ export class PluginHost {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private assetSource: AssetSource | null = null;
+  private moduleSource: ModuleSource | null = null;
 
   constructor(private readonly spawn: () => WorkerLike = spawnWorker) {}
 
   /** Tells the host where to find reference data a game asks for. */
   useAssetSource(source: AssetSource): void {
     this.assetSource = source;
+  }
+
+  /** Tells the host where to find the rules for a game it does not bundle. */
+  useModuleSource(source: ModuleSource): void {
+    this.moduleSource = source;
   }
 
   private ensureWorker(): WorkerLike {
@@ -111,24 +121,46 @@ export class PluginHost {
   }
 
   /**
-   * Sends a request, supplying reference data on demand.
+   * Sends a request, supplying whatever the worker turns out to be missing.
    *
-   * The worker is asked first and only told what it turns out to be missing.
-   * That keeps the common case — every render after the first — free of a
-   * multi-hundred-kilobyte copy, and means a worker that was restarted refills
-   * itself without anyone tracking its lifetime.
+   * The worker is asked first and only told what it lacks. That keeps the
+   * common case — every render after the first — free of a multi-hundred-
+   * kilobyte copy, and means a worker that was restarted refills itself
+   * without anyone tracking its lifetime.
+   *
+   * A cold worker can legitimately need two things: the rules for the game, and
+   * then the reference data those rules read. It asks for them in that order,
+   * because it cannot look at a word list before it can say what a word list
+   * is. Each is supplied at most once per call, so a worker that kept asking
+   * would fail rather than loop.
    */
   private async call(request: WithoutId<PluginRequest>): Promise<PluginResult | undefined> {
-    try {
-      return await this.post(request);
-    } catch (error) {
-      const hash = 'assetHash' in request ? request.assetHash : undefined;
-      if (!isAssetMissing(error) || hash === undefined || !this.assetSource) throw error;
+    let suppliedModule = false;
+    let suppliedAsset = false;
 
-      const bytes = await this.assetSource(hash);
-      await this.post({ op: 'provideAsset', hash, bytes });
+    for (;;) {
+      try {
+        return await this.post(request);
+      } catch (error) {
+        const pluginId = 'pluginId' in request ? request.pluginId : undefined;
+        const hash = 'assetHash' in request ? request.assetHash : undefined;
 
-      return await this.post(request);
+        if (isMissing(error, MODULE_MISSING) && !suppliedModule && pluginId && this.moduleSource) {
+          suppliedModule = true;
+          const bytes = await this.moduleSource(pluginId);
+          await this.post({ op: 'provideModule', pluginId, bytes });
+          continue;
+        }
+
+        if (isMissing(error, ASSET_MISSING) && !suppliedAsset && hash && this.assetSource) {
+          suppliedAsset = true;
+          const bytes = await this.assetSource(hash);
+          await this.post({ op: 'provideAsset', hash, bytes });
+          continue;
+        }
+
+        throw error;
+      }
     }
   }
 
@@ -194,8 +226,8 @@ export class PluginHost {
   }
 }
 
-function isAssetMissing(error: unknown): boolean {
-  return error instanceof Error && error.message === ASSET_MISSING;
+function isMissing(error: unknown, sentinel: string): boolean {
+  return error instanceof Error && error.message === sentinel;
 }
 
 let shared: PluginHost | null = null;

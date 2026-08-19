@@ -1,5 +1,6 @@
 <script lang="ts">
   import BackupPanel from '$lib/components/BackupPanel.svelte';
+  import GamesOnDevice from '$lib/components/GamesOnDevice.svelte';
   import { listContacts } from '$lib/db/store.ts';
   import type { ContactRecord } from '$lib/db/schema.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
@@ -28,6 +29,8 @@
   </section>
 
   <BackupPanel />
+
+  <GamesOnDevice />
 
   <section class="card">
     <h2>People you have played</h2>

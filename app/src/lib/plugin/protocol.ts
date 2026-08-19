@@ -10,6 +10,11 @@
  * referenced by hash afterwards, rather than being copied into every request.
  * The plugin re-checks that hash against its own configuration, so the caching
  * here is only an optimisation and never a trust boundary.
+ *
+ * Rules for a game the app does not bundle arrive the same way, with
+ * `provideModule`. The sandbox cannot fetch, so the main thread does it, checks
+ * the bytes against the signed manifest, and passes them in; the worker takes
+ * what it is given and has no way to ask for anything else.
  */
 
 export interface PluginOutcome {
@@ -27,6 +32,7 @@ export type PluginRequest = { id: number } & (
   | { op: 'pluginVersion'; pluginId: string }
   | { op: 'encodeMove'; pluginId: string; json: string }
   | { op: 'provideAsset'; hash: string; bytes: Uint8Array }
+  | { op: 'provideModule'; pluginId: string; bytes: Uint8Array }
   | {
       op: 'view';
       pluginId: string;
@@ -54,6 +60,15 @@ export type PluginRequest = { id: number } & (
  * not been given. The host catches it, supplies the bytes, and retries once.
  */
 export const ASSET_MISSING = 'asset-missing';
+
+/**
+ * Thrown when a request names a game whose rules this worker has not been
+ * given. The host catches it, fetches and verifies the module, and retries.
+ *
+ * Distinct from "unknown plugin", which is what a game no build of this app can
+ * play gets — that one is not worth retrying.
+ */
+export const MODULE_MISSING = 'module-missing';
 
 export type PluginResult =
   | { kind: 'ok' }

@@ -110,3 +110,29 @@ const INVITE_BLOB: &str = concat!(
     "9658ada85b900a08219dfe4e3bda18f31976a85c08267191325d5795dc2970b2",
     "c9deae821ace3bbdc4626707b152921f83ce",
 );
+
+// -- manifest ---------------------------------------------------------------
+
+/// The manifest signature, frozen so both languages agree on the same bytes.
+///
+/// The TypeScript half of this vector lives in
+/// `app/src/lib/plugin/manifest.test.ts`. A build whose two halves disagree
+/// would verify signatures in Rust that the app rejects, or worse.
+#[test]
+fn a_frozen_manifest_signature_still_verifies() {
+    use tabla_core::identity::parse_public_key;
+    use tabla_core::manifest::{manifest_message, verify};
+
+    let publisher = Identity::from_seed(&[0x33; 32]);
+    let payload = br#"{"version":1,"plugins":[]}"#;
+    let sig = publisher.sign(&manifest_message(payload));
+
+    assert_eq!(hex::encode(sig), MANIFEST_SIG);
+
+    let key = parse_public_key(&publisher.public_key()).expect("the publisher key parses");
+    assert_eq!(hex::encode(publisher.public_key()), PUBLISHER_PUB);
+    assert!(verify(&key, payload, &sig).is_ok());
+}
+
+const PUBLISHER_PUB: &str = "17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce";
+const MANIFEST_SIG: &str = "532947e6d074027a298f761ef1da5ec42c4fa2db227f2f257046908c7a1e3e82384cacd7418125a4dabdbba0ba3e60ead0a2deac416411063a930ed68c5c500c";

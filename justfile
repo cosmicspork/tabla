@@ -44,6 +44,45 @@ dict:
         {{justfile_directory()}}/wordlist/enable.txt \
         {{justfile_directory()}}/app/static/dict/en-v1.dawg
 
+# Rebuild the downloadable plugin module for the word game.
+#
+# Like `dict`, this is a committed artifact and not part of `build`: its hash is
+# pinned in a signed manifest, so regenerating it is a deliberate act that ends
+# in re-signing (`just sign-manifest`). Compilers do not produce byte-identical
+# output across toolchains, which is why the pinned bytes are the ones committed
+# rather than ones rebuilt on demand.
+#
+# The generated loader's fetch fallback is replaced with a throw. The sandbox
+# has no network, so these bytes can only ever arrive from the host after being
+# checked against the manifest — and leaving the fallback in would make Vite
+# emit a second copy of the module into the app bundle, which is exactly what
+# downloading it is meant to avoid.
+plugins:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root={{justfile_directory()}}
+    out="$root/app/src/lib/wasm/letras-pkg"
+    cd "$root/rust/crates/tabla-plugin-wasm"
+    wasm-pack build --target web --no-pack --out-dir "$out" --out-name tabla_letras \
+        -- --no-default-features --features letras
+    sed -i \
+        "s|module_or_path = new URL('tabla_letras_bg.wasm', import.meta.url);|throw new Error('letras module bytes must be provided by the host');|" \
+        "$out/tabla_letras.js"
+    if grep -q 'import.meta.url' "$out/tabla_letras.js"; then
+        echo "the generated loader still resolves its own URL; the patch above needs updating" >&2
+        exit 1
+    fi
+    mkdir -p "$root/app/static/plugins"
+    mv "$out/tabla_letras_bg.wasm" "$root/app/static/plugins/letras-v1.wasm"
+    rm -f "$out/.gitignore"
+
+# Re-sign the plugin manifest after a committed artifact changes.
+#
+# Needs the publisher key in ~/.config/tabla, which is deliberately not in the
+# repository: CI verifies the committed signature and cannot produce one.
+sign-manifest:
+    bun scripts/sign-manifest.mjs
+
 # Build the SvelteKit PWA (consumes the WASM output)
 app: wasm
     cd app && bun run build
@@ -97,6 +136,11 @@ fmt:
 
 check:
     cd rust && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings
+    # Each game must also build on its own: a downloadable plugin module is the
+    # same crate with one game selected, so a game that only compiles alongside
+    # its neighbours would break that build and nothing else would notice.
+    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features tictactoe
+    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features letras
     cd app && bun run check
 
 # Deploy the Worker and static assets to Cloudflare

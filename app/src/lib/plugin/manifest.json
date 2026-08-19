@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "letras",
+      "version": 1,
+      "module": {
+        "path": "/plugins/letras-v1.wasm",
+        "sha256": "af27a39c0d8c9d3d40d3a3d97d52b0b4a48cd849f29076277ca044e11cf0b86a",
+        "bytes": 195189
+      },
+      "assets": [
+        {
+          "id": "en-v1",
+          "path": "/dict/en-v1.dawg",
+          "sha256": "492410d02d6c346bba503cae0483202554d1d36f8e8c5a3d21faa956398a2346",
+          "bytes": 491928
+        }
+      ]
+    }
+  ]
+}

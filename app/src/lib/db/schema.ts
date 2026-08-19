@@ -8,7 +8,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 export const DB_NAME = 'tabla';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 /** Which side of the invite we were on. Decides who moves first. */
 export type Role = 'initiator' | 'claimer';
@@ -65,6 +65,26 @@ export interface EntryRecord {
   entry: Uint8Array;
 }
 
+/**
+ * A verified file this device has downloaded: a plugin module, or the reference
+ * data one reads.
+ *
+ * Keyed by hash, because that is what the manifest pins and what a lookup
+ * actually asks for. Kept here rather than in a cache because these have to
+ * survive an app update — the service worker drops its caches on every new
+ * version — and because a player who removes a game should get the space back,
+ * which a shared cache cannot promise.
+ */
+export interface BlobRecord {
+  /** Hex SHA-256 of `bytes`, checked before this row was ever written. */
+  sha256: string;
+  /** Which plugin's manifest entry brought it in, for removal and totals. */
+  pluginId: string;
+  kind: 'module' | 'asset';
+  bytes: Uint8Array;
+  storedAt: number;
+}
+
 export interface ContactRecord {
   /** base64url Ed25519 public key. The only identifier a peer has. */
   publicKey: string;
@@ -92,6 +112,11 @@ interface TablaDB extends DBSchema {
     key: string;
     value: ContactRecord;
   };
+  blobs: {
+    key: string;
+    value: BlobRecord;
+    indexes: { byPlugin: string };
+  };
 }
 
 export type TablaDatabase = IDBPDatabase<TablaDB>;
@@ -100,18 +125,35 @@ let handle: Promise<TablaDatabase> | null = null;
 
 export function db(): Promise<TablaDatabase> {
   handle ??= openDB<TablaDB>(DB_NAME, DB_VERSION, {
+    // Every store is created only if it is missing, so this one callback
+    // upgrades a database at any earlier version as well as building a new one.
+    // Stores hold what a player cannot get back — games and the identity key —
+    // so an upgrade must never be a rebuild.
     upgrade(database) {
-      database.createObjectStore('meta');
+      if (!database.objectStoreNames.contains('meta')) {
+        database.createObjectStore('meta');
+      }
 
-      const games = database.createObjectStore('games', { keyPath: 'gameId' });
-      games.createIndex('byLastActivity', 'lastActivity');
+      if (!database.objectStoreNames.contains('games')) {
+        const games = database.createObjectStore('games', { keyPath: 'gameId' });
+        games.createIndex('byLastActivity', 'lastActivity');
+      }
 
-      const entries = database.createObjectStore('entries', {
-        keyPath: ['gameId', 'seq'],
-      });
-      entries.createIndex('byGame', 'gameId');
+      if (!database.objectStoreNames.contains('entries')) {
+        const entries = database.createObjectStore('entries', {
+          keyPath: ['gameId', 'seq'],
+        });
+        entries.createIndex('byGame', 'gameId');
+      }
 
-      database.createObjectStore('contacts', { keyPath: 'publicKey' });
+      if (!database.objectStoreNames.contains('contacts')) {
+        database.createObjectStore('contacts', { keyPath: 'publicKey' });
+      }
+
+      if (!database.objectStoreNames.contains('blobs')) {
+        const blobs = database.createObjectStore('blobs', { keyPath: 'sha256' });
+        blobs.createIndex('byPlugin', 'pluginId');
+      }
     },
   });
 
@@ -121,4 +163,16 @@ export function db(): Promise<TablaDatabase> {
 /** Test seam: drops the cached connection so a fresh profile can be opened. */
 export function resetDatabaseHandle(): void {
   handle = null;
+}
+
+/**
+ * Test seam: closes the connection as well as dropping it.
+ *
+ * Deleting a database blocks for as long as anything still holds it open, so a
+ * test that wants a clean profile has to close first or wait forever.
+ */
+export async function closeDatabase(): Promise<void> {
+  const open = handle;
+  handle = null;
+  if (open) (await open).close();
 }

@@ -6,10 +6,10 @@
  * hidden state — a note about where its randomness comes from and which
  * reference data it reads.
  *
- * Both games are compiled into the plugin module today. Phase 3 turns this into
- * a manifest of things that can be fetched and hash-checked; the shape is
- * deliberately the shape that will need, so that change is about *where* an
- * entry comes from rather than what an entry is.
+ * What is *here* is what the app knows how to show: a title, a blurb, a board
+ * to render with. What a downloadable game's bytes must be is not here — that
+ * is the signed manifest's job, and only the manifest's, so there is exactly
+ * one authority on which bytes this build will run.
  */
 import { CORE_PLUGIN_ID, CORE_PLUGIN_VERSION, DICTIONARY_EN_V1 } from '@tabla/shared';
 import type { Component } from 'svelte';
@@ -32,6 +32,16 @@ export type BoardProps = {
  */
 export type SeedKind = 'shared' | 'draw';
 
+/**
+ * Whether a game's rules ship with the app or are fetched on first use.
+ *
+ * One game is bundled so that a fresh install, or one with no network, can
+ * still play something. The rest are modules of their own: a few hundred
+ * kilobytes each, downloaded when somebody actually wants them and removable
+ * afterwards.
+ */
+export type Distribution = 'bundled' | 'downloadable';
+
 export interface GameEntry {
   id: string;
   version: number;
@@ -40,6 +50,7 @@ export interface GameEntry {
   /** One line for the picker. */
   blurb: string;
   seed: SeedKind;
+  distribution: Distribution;
   /** The hash of the reference data this game reads, if it reads any. */
   dictionary?: string;
   /** Loaded on demand: a board is a page's worth of code we need only if used. */
@@ -53,14 +64,16 @@ const REGISTRY: GameEntry[] = [
     title: 'Tic tac toe',
     blurb: 'Three in a row. A quick game, and the one that proves everything works.',
     seed: 'shared',
+    distribution: 'bundled',
     board: () => import('./components/Board.svelte'),
   },
   {
     id: 'letras',
     version: 1,
     title: 'Letras',
-    blurb: 'Words on a board, a turn at a time. Bring a dictionary; the first load needs one.',
+    blurb: 'Words on a board, a turn at a time. Downloads once, then plays offline.',
     seed: 'draw',
+    distribution: 'downloadable',
     dictionary: DICTIONARY_EN_V1.sha256,
     board: () => import('./components/WordBoard.svelte'),
   },

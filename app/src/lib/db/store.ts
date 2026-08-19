@@ -1,6 +1,6 @@
 /** Reads and writes over the local database. */
 import { db } from './schema.ts';
-import type { ContactRecord, EntryRecord, GameRecord } from './schema.ts';
+import type { BlobRecord, ContactRecord, EntryRecord, GameRecord } from './schema.ts';
 
 // -- meta -------------------------------------------------------------------
 
@@ -86,6 +86,31 @@ export async function appendEntries(
 export async function loadEntries(gameId: string): Promise<Uint8Array[]> {
   const rows = await (await db()).getAllFromIndex('entries', 'byGame', gameId);
   return rows.toSorted((a, b) => a.seq - b.seq).map((row) => row.entry);
+}
+
+// -- blobs ------------------------------------------------------------------
+
+/** A downloaded file by hash, or nothing if this device does not hold it. */
+export async function getBlob(sha256: string): Promise<BlobRecord | undefined> {
+  return (await db()).get('blobs', sha256);
+}
+
+export async function putBlob(record: BlobRecord): Promise<void> {
+  await (await db()).put('blobs', record);
+}
+
+/** Everything downloaded on behalf of one plugin. */
+export async function blobsForPlugin(pluginId: string): Promise<BlobRecord[]> {
+  return (await db()).getAllFromIndex('blobs', 'byPlugin', pluginId);
+}
+
+export async function deleteBlobs(hashes: string[]): Promise<void> {
+  if (hashes.length === 0) return;
+
+  const database = await db();
+  const tx = database.transaction('blobs', 'readwrite');
+  for (const hash of hashes) await tx.store.delete(hash);
+  await tx.done;
 }
 
 // -- contacts ---------------------------------------------------------------
