@@ -394,8 +394,8 @@ The purity is structural, not a convention:
   at all. The plugin binary therefore holds no key material and links nothing
   that could use one. A test asserts this by scanning the built artifact for the
   symbols that would say otherwise, so the split cannot quietly collapse into a
-  single module. (For scale: the core is ~284 KB, the plugin ~203 KB with both
-  games in it.)
+  single module. (For scale: the core is ~284 KB, the bundled plugin module
+  ~100 KB, and the downloadable word game a further ~195 KB.)
 
   A game with hidden state does hash — commitments and the tile draw are
   SHA-256 over public values, and the point of them is that the opponent can
@@ -407,8 +407,9 @@ The purity is structural, not a convention:
   IndexedDB handle, never the relay connection,
 - all I/O, crypto, and relay traffic belong to the core app.
 
-Because the boundary already exists, phase 3 changes only *how* a plugin module
-is fetched and verified, not what it is permitted to do.
+Because the boundary already existed, phase 3 changed only *how* a plugin module
+is fetched and verified, not what it is permitted to do. See **Plugin
+distribution** below.
 
 The plugin also owns move serialization (`encodeMove` / `decodeMove`). The UI
 describes a move in its own terms — `{"cell":4}` — and never hand-rolls the wire
@@ -418,10 +419,94 @@ the UI and the rules would be unrecoverable rather than merely wrong.
 `player_view` exists so that a game with hidden state can render without the
 renderer ever holding the parts that player is not entitled to see.
 
-Downloadable plugins (phase 3) will ship with hashes pinned in a signed manifest
-bundled with the core app, verified on load and refused on mismatch. Phase 1
-compiles tic tac toe in, so the isolation is enforced but the manifest is not
-yet needed.
+## Plugin distribution
+
+Tic tac toe is compiled into the app. Every other game — Letras today — is a
+WASM module of its own, fetched the first time somebody plays it, checked
+against a signed manifest, and kept on the device until they remove it.
+
+One game stays bundled deliberately: a fresh install, or a device with no
+connection, still has something to play.
+
+### The manifest
+
+`app/src/lib/plugin/manifest.json` names every downloadable module and every
+reference file one reads, each by path, SHA-256, and byte count. It ships with
+the app, alongside `manifest.sig`: an Ed25519 signature over the tag
+`tabla-manifest/v1` followed by the manifest file *verbatim*.
+
+Verbatim matters. The signature covers the bytes as stored, so there is no
+canonical form to agree on and no parser for a forged manifest to reach — the
+JSON is not looked at until the signature checks out. `app/.prettierignore`
+keeps the formatter from having an opinion about a file whose exact bytes are
+load-bearing.
+
+Verification happens in the **core** module (`tabla-core::manifest`, exposed as
+`verifyManifest`), never in the plugin module, which links no keyed
+cryptography at all — the very property the manifest exists to protect. The
+publisher's public key is pinned in `shared/src/constants.ts`; the private key
+lives outside the repository, so CI can verify a signature and can never
+produce one.
+
+### What the signature is and is not worth
+
+Being plain about this is better than implying more. The manifest, the
+signature, and the key that checks it all ship in the same bundle: anyone who
+can rewrite the bundle can rewrite all three, and the signature proves nothing
+about that. Its value is in two real places:
+
+- an artifact's hash cannot change in the repository without someone holding
+  the key deliberately re-signing, so a changed binary is never a diff nobody
+  looked at; and
+- the day a manifest is served from anywhere other than the bundle — a remote
+  catalogue, a third-party game — the verification is already in place and
+  load-bearing rather than being retrofitted.
+
+Rotating the key means re-signing and shipping the new constant in the same
+release. An older build keeps trusting the old key, which is correct: it is
+also still running the artifacts that key signed.
+
+### Committed artifacts
+
+`app/static/plugins/letras-v1.wasm` is committed, not built by `just build`.
+Compilers do not produce byte-identical output across toolchains, and the bytes
+a player downloads have to be the bytes a hash was pinned to. `just plugins`
+regenerates it and `just sign-manifest` re-signs; both are deliberate acts, the
+way `just dict` already was.
+
+The recipe also patches the generated loader's fetch fallback into a throw. The
+sandbox has no network, so a module can only ever arrive from the host — and
+leaving the fallback in would make the bundler emit a second copy of the module
+into the app, which is precisely what downloading it avoids. A test asserts the
+committed loader contains no `import.meta.url`, so a regeneration that skipped
+the patch fails loudly.
+
+### Fetching, storing, and removing
+
+`plugin/install.ts` is the only path: verified manifest, then memory, then
+IndexedDB, then the network — and every fetch ends in a hash check against the
+manifest before the bytes are stored or used. The check is not a formality: the
+app is served with a single-page fallback, so a mistyped path comes back as
+`index.html` with a cheerful 200.
+
+Files are kept in IndexedDB rather than a cache. The service worker drops every
+cache on activation, so a cached module would be re-downloaded on every
+release, and a cache cannot promise a player that removing a game gave the
+space back. The service worker skips `/plugins/` and `/dict/` entirely, so
+nothing is stored twice.
+
+A miss is never fatal, and that is what makes the iOS eviction guidance
+straightforward: a device that discards storage after a week of inactivity, and
+a player who removed the game and came back, are the same case, handled by the
+same line — fetch it again.
+
+### What "downloadable" does not mean
+
+The rules download; the app does not. A game's board component, its loader
+glue, and its registry entry still ship with the app, and so does the manifest
+itself. A genuinely new game therefore still needs an app update. What phase 3
+buys is that a game's *rules and data* — the bulk of it — are fetched on
+demand, verified before they run, and removable afterwards.
 
 ## Fairness tiers
 
@@ -558,6 +643,10 @@ worse than one that names them:
   relay that lost data or is lying about history. It cannot protect against
   someone with database access deleting the row; that is outside the threat
   model and no client-side protocol can fix it.
+- **A rewritten app bundle.** The plugin manifest is signed, but the signature,
+  the manifest, and the key that checks it all ship together — so it detects a
+  changed *artifact*, not a changed *app*. Whoever serves the app is trusted to
+  serve the app. See **Plugin distribution**.
 
 ## Phases
 
@@ -565,7 +654,7 @@ worse than one that names them:
 2. **Done:** Letras — ENABLE-derived word list (never TWL/NWL or Collins),
    original board, tile distribution, and name; private draw streams with an
    end-of-game audit, and tournament-style challenges.
-3. Downloadable plugins with signed manifests and pinned hashes. The asset seam
-   and the hash pinning landed with phase 2, so what remains is fetching a
-   *module* the way a dictionary is already fetched.
+3. **Done:** downloadable plugins with a signed manifest and pinned hashes.
+   Letras is fetched on first play and removable in settings; tic tac toe stays
+   bundled so a fresh install can play offline.
 4. Real-time competitive tier.

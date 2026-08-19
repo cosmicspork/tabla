@@ -14,9 +14,12 @@
 //! keyed. A test scans the built artifact for the symbols that would say
 //! otherwise.
 //!
-//! Phase 3 makes plugins downloadable with hashes pinned in a signed manifest.
-//! Because that boundary already exists here, the change will be to *how* this
-//! module is fetched and verified, not to what it is allowed to do.
+//! One build of this crate is bundled into the app; others are built with a
+//! single game selected and downloaded on demand, their hashes pinned in a
+//! signed manifest. Which games a binary carries is a cargo feature, so a
+//! module shipped for one game holds no code for any other. What a plugin is
+//! permitted to do is the same either way — being fetched changes where the
+//! bytes came from, not what they may touch.
 
 use tabla_plugin_api::{BytePlugin, GamePlugin, Outcome, PlayerId, PluginError};
 use wasm_bindgen::prelude::*;
