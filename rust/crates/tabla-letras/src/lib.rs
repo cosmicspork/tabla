@@ -10,7 +10,14 @@
 //! in `ARCHITECTURE.md` under the fairness tiers.
 
 pub mod board;
+pub mod draw;
+pub mod game;
 pub mod tiles;
+
+pub use game::{Action, Letras, Move, State, config_for};
+
+/// The byte-level plugin the registry and the WASM boundary use.
+pub type Plugin = tabla_plugin_api::Adapter<Letras>;
 
 #[cfg(test)]
 mod tests;

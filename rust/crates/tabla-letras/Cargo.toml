@@ -13,3 +13,10 @@ postcard.workspace = true
 # Hidden state needs commitments and a deterministic draw, which is hashing over
 # public values. No key ever reaches this crate and nothing here is keyed.
 sha2.workspace = true
+
+[dev-dependencies]
+# Tests compile small word lists of their own, so they can pin exactly which
+# words are real without carrying the shipped dictionary around.
+tabla-dawg = { workspace = true, features = ["build"] }
+# Views cross into TypeScript as JSON; tests check the shape that actually goes.
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }

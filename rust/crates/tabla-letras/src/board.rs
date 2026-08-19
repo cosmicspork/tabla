@@ -130,7 +130,7 @@ pub struct Placement {
     /// The tile taken from the rack. `0` is a blank.
     pub tile: Tile,
     /// Required for a blank and forbidden otherwise: what it will read as.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Always encoded, even when absent — see the note on `Move`.
     pub blank_as: Option<u8>,
 }
 
@@ -156,10 +156,13 @@ impl Placement {
 }
 
 /// Fifteen by fifteen, in reading order.
-pub type Board = [Option<Placed>; CELLS];
+///
+/// A `Vec` rather than an array because it lives inside the serialized game
+/// state, and 225 is well past the array sizes serde derives for.
+pub type Board = Vec<Option<Placed>>;
 
 pub fn empty_board() -> Board {
-    [None; CELLS]
+    vec![None; CELLS]
 }
 
 /// Why a placement was refused.
@@ -219,7 +222,10 @@ impl Word {
 /// That is the opponent's business, raised as a challenge, and checking it here
 /// would quietly turn the game into one where invalid words are impossible
 /// rather than punishable.
-pub fn validate_placement(board: &Board, placements: &[Placement]) -> Result<(), Illegal> {
+pub fn validate_placement(
+    board: &[Option<Placed>],
+    placements: &[Placement],
+) -> Result<(), Illegal> {
     if placements.is_empty() || placements.len() > RACK {
         return Err(Illegal::WrongCount);
     }
@@ -287,7 +293,7 @@ pub fn validate_placement(board: &Board, placements: &[Placement]) -> Result<(),
     Ok(())
 }
 
-fn touches_a_tile(board: &Board, cell: usize) -> bool {
+fn touches_a_tile(board: &[Option<Placed>], cell: usize) -> bool {
     let (row, col) = (cell / SIZE, cell % SIZE);
 
     (row > 0 && board[cell - SIZE].is_some())
@@ -297,8 +303,8 @@ fn touches_a_tile(board: &Board, cell: usize) -> bool {
 }
 
 /// The board as it will be once these tiles are down.
-pub fn with_placements(board: &Board, placements: &[Placement]) -> Board {
-    let mut next = *board;
+pub fn with_placements(board: &[Option<Placed>], placements: &[Placement]) -> Board {
+    let mut next = board.to_vec();
     for placement in placements {
         if let Some(placed) = placement.placed() {
             next[placement.cell()] = Some(placed);
@@ -312,7 +318,7 @@ pub fn with_placements(board: &Board, placements: &[Placement]) -> Board {
 ///
 /// Runs of one letter are not words and are left out, so a play that only
 /// extends downwards produces exactly the one word it made.
-pub fn words_formed(board: &Board, placements: &[Placement]) -> Vec<Word> {
+pub fn words_formed(board: &[Option<Placed>], placements: &[Placement]) -> Vec<Word> {
     let after = with_placements(board, placements);
     let mut cells: Vec<usize> = placements.iter().map(Placement::cell).collect();
     cells.sort_unstable();
@@ -333,7 +339,7 @@ pub fn words_formed(board: &Board, placements: &[Placement]) -> Vec<Word> {
 }
 
 /// The maximal unbroken run of tiles through `cell` in one direction.
-fn run_through(board: &Board, cell: usize, step: usize) -> Option<Word> {
+fn run_through(board: &[Option<Placed>], cell: usize, step: usize) -> Option<Word> {
     let (row, col) = (cell / SIZE, cell % SIZE);
     let (before, after) = if step == 1 {
         (col, SIZE - 1 - col)
@@ -385,7 +391,7 @@ fn run_through(board: &Board, cell: usize, step: usize) -> Option<Word> {
 /// Premium squares count only for the tiles placed this turn: a square is spent
 /// the moment something lands on it, which is why building across an old triple
 /// is worth so much less than reaching a new one.
-pub fn score_play(board: &Board, placements: &[Placement]) -> i32 {
+pub fn score_play(board: &[Option<Placed>], placements: &[Placement]) -> i32 {
     let after = with_placements(board, placements);
     let fresh: Vec<usize> = placements.iter().map(Placement::cell).collect();
 
