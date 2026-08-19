@@ -5,3 +5,7 @@ src/lib/wasm/letras-pkg/
 
 build/
 .svelte-kit/
+
+# Signed exactly as stored: reformatting either would invalidate the signature.
+src/lib/plugin/manifest.json
+src/lib/plugin/manifest.sig

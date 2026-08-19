@@ -1,9 +1,23 @@
 /** Wire protocol version. Peers refuse to interoperate across a mismatch. */
 export const PROTOCOL_VERSION = 1;
 
-/** Plugin bundled into the core app in phase 1. */
+/** The game bundled into the app, so a fresh install can play without a network. */
 export const CORE_PLUGIN_ID = 'tictactoe';
 export const CORE_PLUGIN_VERSION = 1;
+
+/**
+ * The key every plugin manifest in this build must be signed with.
+ *
+ * Pinning it here is what makes the manifest worth signing: an artifact hash
+ * cannot change without someone holding the matching private key, which lives
+ * outside the repository and is never available to CI.
+ *
+ * Rotating it means re-signing the manifest and shipping this constant in the
+ * same release — an old build keeps trusting the old key, which is correct,
+ * since it is also still running the artifacts that key signed.
+ */
+export const MANIFEST_SIGNING_PUBKEY =
+  'dcf8f0b6b9eb93d8cc1f742268a00d4cd860bccb24a8eaf92c66d158b23174e4';
 
 /**
  * The word list the word game plays against.

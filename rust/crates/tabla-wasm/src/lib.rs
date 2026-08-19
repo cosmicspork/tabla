@@ -15,6 +15,7 @@ use tabla_core::identity::parse_public_key;
 use tabla_core::invite::{self, InviteConfig};
 use tabla_core::kex;
 use tabla_core::log::{self, Entry, Participants, Tombstone};
+use tabla_core::manifest;
 use tabla_core::session::{EntryBody, Role, SessionError};
 use tabla_core::{BLOB_ID_LEN, GAME_ID_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN, SEED_LEN, SIG_LEN};
 use wasm_bindgen::prelude::*;
@@ -140,6 +141,28 @@ pub fn verify_claim(
     let sig = fixed::<SIG_LEN>(signature, "signature")?;
 
     invite::verify_claim(&key, &blob_id, &sig).map_err(crypto_err)
+}
+
+/// Verifies the plugin manifest against the publisher key pinned in this build.
+///
+/// The app calls this before it will fetch, store, or run a downloadable
+/// module. It lives in this module rather than the plugin one because the
+/// plugin module deliberately links no keyed cryptography — the thing the
+/// manifest exists to keep true.
+#[wasm_bindgen(js_name = verifyManifest)]
+pub fn verify_manifest(
+    publisher_public_key: &[u8],
+    payload: &[u8],
+    signature: &[u8],
+) -> Result<(), JsError> {
+    let key = parse_public_key(&fixed::<PUBKEY_LEN>(
+        publisher_public_key,
+        "publisher public key",
+    )?)
+    .map_err(crypto_err)?;
+    let sig = fixed::<SIG_LEN>(signature, "signature")?;
+
+    manifest::verify(&key, payload, &sig).map_err(crypto_err)
 }
 
 // -- invites ----------------------------------------------------------------

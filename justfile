@@ -76,6 +76,13 @@ plugins:
     mv "$out/tabla_letras_bg.wasm" "$root/app/static/plugins/letras-v1.wasm"
     rm -f "$out/.gitignore"
 
+# Re-sign the plugin manifest after a committed artifact changes.
+#
+# Needs the publisher key in ~/.config/tabla, which is deliberately not in the
+# repository: CI verifies the committed signature and cannot produce one.
+sign-manifest:
+    bun scripts/sign-manifest.mjs
+
 # Build the SvelteKit PWA (consumes the WASM output)
 app: wasm
     cd app && bun run build
