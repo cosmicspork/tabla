@@ -11,7 +11,12 @@
  * primary control is that nothing secret is ever sent here.
  */
 import { loadPlugin } from '../wasm/plugin.ts';
-import type { PluginOutcome, PluginRequest, PluginResponse } from './protocol.ts';
+import {
+  ASSET_MISSING,
+  type PluginOutcome,
+  type PluginRequest,
+  type PluginResponse,
+} from './protocol.ts';
 
 // Remove the ways out before the plugin module is even fetched.
 for (const capability of [
@@ -34,6 +39,26 @@ for (const capability of [
 
 const ready = loadPlugin();
 
+/**
+ * Reference data, keyed by hash, kept so a large word list crosses the boundary
+ * once rather than on every render.
+ *
+ * Holding it here is safe precisely because it is not secret: it is the same
+ * public data both players pinned in the invite, and the plugin re-derives its
+ * hash rather than trusting that this map holds the right bytes.
+ */
+const assets = new Map<string, Uint8Array>();
+
+const EMPTY = new Uint8Array();
+
+function assetFor(hash: string | undefined): Uint8Array {
+  if (hash === undefined) return EMPTY;
+
+  const bytes = assets.get(hash);
+  if (!bytes) throw new Error(ASSET_MISSING);
+  return bytes;
+}
+
 self.addEventListener('message', (event: MessageEvent<PluginRequest>) => {
   void handle(event.data);
 });
@@ -42,7 +67,11 @@ async function handle(request: PluginRequest): Promise<void> {
   try {
     const plugin = await ready;
     const result = run(plugin, request);
-    self.postMessage({ id: request.id, ok: true, result } satisfies PluginResponse);
+    self.postMessage({
+      id: request.id,
+      ok: true,
+      result,
+    } satisfies PluginResponse);
   } catch (error) {
     self.postMessage({
       id: request.id,
@@ -64,7 +93,14 @@ function run(
       return { kind: 'number', value: plugin.plugin_version(request.pluginId) };
 
     case 'encodeMove':
-      return { kind: 'bytes', value: plugin.encodeMove(request.pluginId, request.json) };
+      return {
+        kind: 'bytes',
+        value: plugin.encodeMove(request.pluginId, request.json),
+      };
+
+    case 'provideAsset':
+      assets.set(request.hash, request.bytes);
+      return { kind: 'ok' };
 
     case 'view': {
       // The whole position is recomputed from the move list every time. It is
@@ -74,6 +110,7 @@ function run(
         request.config,
         request.seed,
         request.moves,
+        assetFor(request.assetHash),
       );
       return {
         kind: 'view',
@@ -85,13 +122,15 @@ function run(
     }
 
     case 'validate': {
+      const asset = assetFor(request.assetHash);
       const state = plugin.replay(
         request.pluginId,
         request.config,
         request.seed,
         request.moves,
+        asset,
       );
-      plugin.validate_move(request.pluginId, state, request.move, request.player);
+      plugin.validate_move(request.pluginId, state, request.move, request.player, asset);
       return { kind: 'ok' };
     }
   }

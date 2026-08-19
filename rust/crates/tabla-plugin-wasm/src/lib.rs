@@ -45,10 +45,18 @@ pub fn plugin_version(plugin_id: &str) -> Result<u32, JsError> {
     Ok(lookup(plugin_id)?.version())
 }
 
+/// `assets` is the bulk reference data a game needs — a word list, say. It is
+/// passed in because a plugin cannot fetch anything itself, and the game checks
+/// it against the hash its configuration pins rather than trusting the host.
 #[wasm_bindgen]
-pub fn setup(plugin_id: &str, config: &[u8], seed: &[u8]) -> Result<Vec<u8>, JsError> {
+pub fn setup(
+    plugin_id: &str,
+    config: &[u8],
+    seed: &[u8],
+    assets: &[u8],
+) -> Result<Vec<u8>, JsError> {
     lookup(plugin_id)?
-        .setup(config, &seed32(seed)?)
+        .setup(config, &seed32(seed)?, assets)
         .map_err(plugin_err)
 }
 
@@ -58,15 +66,23 @@ pub fn validate_move(
     state: &[u8],
     mv: &[u8],
     player: PlayerId,
+    assets: &[u8],
 ) -> Result<(), JsError> {
     lookup(plugin_id)?
-        .validate_move(state, mv, player)
+        .validate_move(state, mv, player, assets)
         .map_err(plugin_err)
 }
 
 #[wasm_bindgen]
-pub fn apply_move(plugin_id: &str, state: &[u8], mv: &[u8]) -> Result<Vec<u8>, JsError> {
-    lookup(plugin_id)?.apply_move(state, mv).map_err(plugin_err)
+pub fn apply_move(
+    plugin_id: &str,
+    state: &[u8],
+    mv: &[u8],
+    assets: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    lookup(plugin_id)?
+        .apply_move(state, mv, assets)
+        .map_err(plugin_err)
 }
 
 /// Renders what one player is entitled to see, as JSON.
@@ -118,9 +134,10 @@ pub fn replay(
     config: &[u8],
     seed: &[u8],
     moves: Vec<js_sys::Uint8Array>,
+    assets: &[u8],
 ) -> Result<Vec<u8>, JsError> {
     let moves: Vec<Vec<u8>> = moves.iter().map(|m| m.to_vec()).collect();
     lookup(plugin_id)?
-        .replay(config, &seed32(seed)?, &moves)
+        .replay(config, &seed32(seed)?, &moves, assets)
         .map_err(plugin_err)
 }

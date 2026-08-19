@@ -78,12 +78,12 @@ impl GamePlugin for TicTacToe {
     type Move = Move;
     type View = View;
 
-    /// Tic tac toe takes no configuration and needs no entropy.
+    /// Tic tac toe takes no configuration, needs no entropy, and reads no data.
     ///
-    /// Both are still part of the signature, because the interface has to serve
-    /// games that need them, and a game that ignores them must not be able to
-    /// tell that it was handed different ones.
-    fn setup(_config: &[u8], _seed: &[u8; 32]) -> Result<State, PluginError> {
+    /// All three are still part of the signature, because the interface has to
+    /// serve games that need them, and a game that ignores them must not be able
+    /// to tell that it was handed different ones.
+    fn setup(_config: &[u8], _seed: &[u8; 32], _assets: &[u8]) -> Result<State, PluginError> {
         Ok(State {
             board: [None; BOARD_SIZE],
             to_move: tabla_plugin_api::PLAYER_INITIATOR,
@@ -91,7 +91,12 @@ impl GamePlugin for TicTacToe {
         })
     }
 
-    fn validate_move(state: &State, mv: &Move, player: PlayerId) -> Result<(), PluginError> {
+    fn validate_move(
+        state: &State,
+        mv: &Move,
+        player: PlayerId,
+        _assets: &[u8],
+    ) -> Result<(), PluginError> {
         if Self::is_game_over(state).is_some() {
             return Err(PluginError::GameOver);
         }
@@ -112,7 +117,7 @@ impl GamePlugin for TicTacToe {
         Ok(())
     }
 
-    fn apply_move(mut state: State, mv: &Move) -> Result<State, PluginError> {
+    fn apply_move(mut state: State, mv: &Move, _assets: &[u8]) -> Result<State, PluginError> {
         let cell = mv.cell as usize;
         if cell >= BOARD_SIZE {
             return Err(PluginError::IllegalMove {

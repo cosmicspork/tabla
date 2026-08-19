@@ -86,6 +86,7 @@ class Client {
       replay.config ?? new Uint8Array(),
       new Uint8Array(32),
       [...replay.moves],
+      new Uint8Array(),
     );
     return JSON.parse(plugin.player_view('tictactoe', state, player));
   }
@@ -97,6 +98,7 @@ class Client {
       replay.config ?? new Uint8Array(),
       new Uint8Array(32),
       [...replay.moves],
+      new Uint8Array(),
     );
     const raw = plugin.is_game_over('tictactoe', state);
     return raw === undefined || raw === null ? null : JSON.parse(raw);

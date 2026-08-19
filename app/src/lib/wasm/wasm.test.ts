@@ -240,11 +240,19 @@ describe('tombstones', () => {
   });
 });
 
+/** Games that read no reference data are handed an empty slice. */
+const NO_ASSETS = new Uint8Array();
+
 describe('plugin module', () => {
-  it('is built without any cryptography linked in', async () => {
-    // The isolation claim is a property of the build: the plugin binary has no
-    // crypto in it, so a compromised plugin has nothing to leak and nothing to
-    // sign with. This asserts that the split has not quietly collapsed.
+  it('is built without any keyed cryptography linked in', async () => {
+    // The isolation claim is a property of the build: the plugin binary holds
+    // no keys and nothing that could use one, so a compromised plugin has
+    // nothing to leak and nothing to sign with. This asserts that the split has
+    // not quietly collapsed.
+    //
+    // A plain hash is not on this list and is not meant to be. Games with
+    // hidden state commit to their draws and audit them afterwards, which is
+    // hashing over public values; it grants no access to anything.
     const bytes = await readPluginWasm();
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes).toLowerCase();
 
@@ -260,7 +268,7 @@ describe('plugin module', () => {
   });
 
   it('renders a starting position', () => {
-    const state = plugin.setup('tictactoe', new Uint8Array(), new Uint8Array(32));
+    const state = plugin.setup('tictactoe', new Uint8Array(), new Uint8Array(32), NO_ASSETS);
     const view = JSON.parse(plugin.player_view('tictactoe', state, 0));
 
     expect(view.board).toEqual(Array(9).fill(null));
@@ -277,6 +285,7 @@ describe('plugin module', () => {
       replay.config ?? new Uint8Array(),
       new Uint8Array(32),
       [...replay.moves],
+      NO_ASSETS,
     );
 
     const outcome = plugin.is_game_over('tictactoe', state);
@@ -284,18 +293,18 @@ describe('plugin module', () => {
   });
 
   it('rejects an illegal move rather than applying it', () => {
-    const state = plugin.setup('tictactoe', new Uint8Array(), new Uint8Array(32));
-    const taken = plugin.apply_move('tictactoe', state, encodeMove(4));
+    const state = plugin.setup('tictactoe', new Uint8Array(), new Uint8Array(32), NO_ASSETS);
+    const taken = plugin.apply_move('tictactoe', state, encodeMove(4), NO_ASSETS);
 
-    expect(() => plugin.validate_move('tictactoe', taken, encodeMove(4), 1)).toThrow(
+    expect(() => plugin.validate_move('tictactoe', taken, encodeMove(4), 1, NO_ASSETS)).toThrow(
       /already taken/,
     );
   });
 
   it('rejects a move made out of turn', () => {
-    const state = plugin.setup('tictactoe', new Uint8Array(), new Uint8Array(32));
+    const state = plugin.setup('tictactoe', new Uint8Array(), new Uint8Array(32), NO_ASSETS);
 
-    expect(() => plugin.validate_move('tictactoe', state, encodeMove(0), 1)).toThrow(
+    expect(() => plugin.validate_move('tictactoe', state, encodeMove(0), 1, NO_ASSETS)).toThrow(
       /not your turn/,
     );
   });

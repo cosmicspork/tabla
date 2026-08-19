@@ -3,7 +3,9 @@
 //! A plugin is a set of **pure functions over bytes**. It has no network access,
 //! no key access, and no storage access — not by convention, but because it is
 //! never handed any. Everything a plugin can touch arrives as a function
-//! argument, and the only thing it can do is return a value.
+//! argument, and the only thing it can do is return a value. That includes bulk
+//! reference data: a game that needs a dictionary receives it as `assets` rather
+//! than fetching it, because it has no way to fetch anything.
 //!
 //! That is what makes the end-to-end encryption claim real. The core app owns
 //! all I/O, all cryptography, and all relay traffic; a plugin can compute the
@@ -41,6 +43,9 @@ pub enum Outcome {
 pub enum PluginError {
     /// The setup configuration was not understood.
     BadConfig,
+    /// The reference data handed in as `assets` was missing or not the data the
+    /// configuration pinned. Games verify this themselves; see [`GamePlugin`].
+    BadAssets,
     /// Serialized state could not be decoded.
     BadState,
     /// The move could not be decoded.
@@ -59,6 +64,7 @@ impl core::fmt::Display for PluginError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::BadConfig => f.write_str("invalid game configuration"),
+            Self::BadAssets => f.write_str("game data missing or does not match the game"),
             Self::BadState => f.write_str("invalid game state"),
             Self::BadMove => f.write_str("move could not be decoded"),
             Self::NotYourTurn => f.write_str("not your turn"),
@@ -78,6 +84,20 @@ impl core::error::Error for PluginError {}
 /// same log independently and any divergence is an unrecoverable desync. That
 /// rules out wall-clock time, ambient randomness, and iteration over unordered
 /// collections. Any randomness a game needs comes from `seed`.
+///
+/// # Assets
+///
+/// `assets` is bulk reference data the game needs but does not carry: a word
+/// list, a card deck description, a level table. It is supplied by the host
+/// because a plugin cannot fetch anything, and it is **untrusted** — a game that
+/// uses assets must verify them against a hash carried in its own `config`
+/// (which is itself pinned in the invite both players agreed to) and return
+/// [`PluginError::BadAssets`] on a mismatch. Otherwise two clients holding
+/// different data would validate differently, which is exactly the desync the
+/// determinism rule exists to prevent.
+///
+/// Games that need no reference data receive an empty slice and must behave
+/// identically whatever they are handed.
 pub trait GamePlugin {
     /// Stable identifier carried in the invite blob.
     const ID: &'static str;
@@ -90,20 +110,25 @@ pub trait GamePlugin {
 
     /// Builds the starting state.
     ///
-    /// `seed` is the jointly derived entropy for the game. Tic tac toe ignores
-    /// it; games with hidden state use it to shuffle deterministically so that
-    /// both clients agree and the shuffle can be audited afterwards.
-    fn setup(config: &[u8], seed: &[u8; 32]) -> Result<Self::State, PluginError>;
+    /// `seed` is this player's entropy for the game. Tic tac toe ignores it;
+    /// games with hidden state use it to derive their private draws so that the
+    /// result is fixed in advance and can be audited afterwards.
+    fn setup(config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<Self::State, PluginError>;
 
     /// Checks a move without applying it.
     fn validate_move(
         state: &Self::State,
         mv: &Self::Move,
         player: PlayerId,
+        assets: &[u8],
     ) -> Result<(), PluginError>;
 
     /// Applies a move that [`Self::validate_move`] has already accepted.
-    fn apply_move(state: Self::State, mv: &Self::Move) -> Result<Self::State, PluginError>;
+    fn apply_move(
+        state: Self::State,
+        mv: &Self::Move,
+        assets: &[u8],
+    ) -> Result<Self::State, PluginError>;
 
     /// What one player is entitled to see.
     ///
@@ -123,9 +148,15 @@ pub trait BytePlugin {
     fn id(&self) -> &'static str;
     fn version(&self) -> u32;
 
-    fn setup(&self, config: &[u8], seed: &[u8; 32]) -> Result<Vec<u8>, PluginError>;
-    fn validate_move(&self, state: &[u8], mv: &[u8], player: PlayerId) -> Result<(), PluginError>;
-    fn apply_move(&self, state: &[u8], mv: &[u8]) -> Result<Vec<u8>, PluginError>;
+    fn setup(&self, config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<Vec<u8>, PluginError>;
+    fn validate_move(
+        &self,
+        state: &[u8],
+        mv: &[u8],
+        player: PlayerId,
+        assets: &[u8],
+    ) -> Result<(), PluginError>;
+    fn apply_move(&self, state: &[u8], mv: &[u8], assets: &[u8]) -> Result<Vec<u8>, PluginError>;
     fn player_view(&self, state: &[u8], player: PlayerId) -> Result<Vec<u8>, PluginError>;
     fn is_game_over(&self, state: &[u8]) -> Result<Option<Outcome>, PluginError>;
 
@@ -139,6 +170,7 @@ pub trait BytePlugin {
         config: &[u8],
         seed: &[u8; 32],
         moves: &[Vec<u8>],
+        assets: &[u8],
     ) -> Result<Vec<u8>, PluginError>;
 
     /// Turns a move described as JSON into its canonical wire encoding.
@@ -186,20 +218,26 @@ impl<P: GamePlugin> BytePlugin for Adapter<P> {
         P::VERSION
     }
 
-    fn setup(&self, config: &[u8], seed: &[u8; 32]) -> Result<Vec<u8>, PluginError> {
-        encode(&P::setup(config, seed)?, PluginError::BadState)
+    fn setup(&self, config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<Vec<u8>, PluginError> {
+        encode(&P::setup(config, seed, assets)?, PluginError::BadState)
     }
 
-    fn validate_move(&self, state: &[u8], mv: &[u8], player: PlayerId) -> Result<(), PluginError> {
+    fn validate_move(
+        &self,
+        state: &[u8],
+        mv: &[u8],
+        player: PlayerId,
+        assets: &[u8],
+    ) -> Result<(), PluginError> {
         let state: P::State = decode(state, PluginError::BadState)?;
         let mv: P::Move = decode(mv, PluginError::BadMove)?;
-        P::validate_move(&state, &mv, player)
+        P::validate_move(&state, &mv, player, assets)
     }
 
-    fn apply_move(&self, state: &[u8], mv: &[u8]) -> Result<Vec<u8>, PluginError> {
+    fn apply_move(&self, state: &[u8], mv: &[u8], assets: &[u8]) -> Result<Vec<u8>, PluginError> {
         let state: P::State = decode(state, PluginError::BadState)?;
         let mv: P::Move = decode(mv, PluginError::BadMove)?;
-        encode(&P::apply_move(state, &mv)?, PluginError::BadState)
+        encode(&P::apply_move(state, &mv, assets)?, PluginError::BadState)
     }
 
     fn player_view(&self, state: &[u8], player: PlayerId) -> Result<Vec<u8>, PluginError> {
@@ -217,8 +255,9 @@ impl<P: GamePlugin> BytePlugin for Adapter<P> {
         config: &[u8],
         seed: &[u8; 32],
         moves: &[Vec<u8>],
+        assets: &[u8],
     ) -> Result<Vec<u8>, PluginError> {
-        let mut state = P::setup(config, seed)?;
+        let mut state = P::setup(config, seed, assets)?;
 
         for (i, raw) in moves.iter().enumerate() {
             if P::is_game_over(&state).is_some() {
@@ -235,8 +274,8 @@ impl<P: GamePlugin> BytePlugin for Adapter<P> {
                 PLAYER_CLAIMER
             };
 
-            P::validate_move(&state, &mv, player)?;
-            state = P::apply_move(state, &mv)?;
+            P::validate_move(&state, &mv, player, assets)?;
+            state = P::apply_move(state, &mv, assets)?;
         }
 
         encode(&state, PluginError::BadState)

@@ -5,7 +5,22 @@
  * here is careful to pass only game data — never a key, never a game id, never
  * anything that would tell the plugin who is playing.
  */
-import type { PluginRequest, PluginResponse, PluginResult, PluginView } from './protocol.ts';
+import {
+  ASSET_MISSING,
+  type PluginRequest,
+  type PluginResponse,
+  type PluginResult,
+  type PluginView,
+} from './protocol.ts';
+
+/**
+ * Supplies the bytes for a hash the worker is missing.
+ *
+ * Registered by the app rather than called directly so that this module keeps
+ * no opinion about where reference data comes from — and, more to the point, so
+ * the sandbox's own inability to fetch stays the only fetching story.
+ */
+export type AssetSource = (hash: string) => Promise<Uint8Array>;
 
 /**
  * `Omit` over a union keeps only the keys every member shares, which would drop
@@ -18,17 +33,55 @@ type Pending = {
   reject: (error: Error) => void;
 };
 
+/**
+ * What this host needs from a sandbox, stated in its own terms rather than the
+ * DOM's, so a test can stand one in without a browser.
+ *
+ * The sandbox guarantees come from what the real worker deletes at startup and
+ * from what is never sent to it — not from this type — so substituting it in a
+ * test weakens nothing.
+ */
+export interface WorkerLike {
+  postMessage(message: unknown): void;
+  onMessage(handler: (response: PluginResponse) => void): void;
+  onError(handler: (message: string) => void): void;
+  terminate(): void;
+}
+
+function spawnWorker(): WorkerLike {
+  const worker = new Worker(new URL('./worker.ts', import.meta.url), {
+    type: 'module',
+  });
+
+  return {
+    postMessage: (message) => worker.postMessage(message),
+    onMessage: (handler) =>
+      worker.addEventListener('message', (event: MessageEvent<PluginResponse>) =>
+        handler(event.data),
+      ),
+    onError: (handler) => worker.addEventListener('error', (event) => handler(event.message)),
+    terminate: () => worker.terminate(),
+  };
+}
+
 export class PluginHost {
-  private worker: Worker | null = null;
+  private worker: WorkerLike | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
+  private assetSource: AssetSource | null = null;
 
-  private ensureWorker(): Worker {
+  constructor(private readonly spawn: () => WorkerLike = spawnWorker) {}
+
+  /** Tells the host where to find reference data a game asks for. */
+  useAssetSource(source: AssetSource): void {
+    this.assetSource = source;
+  }
+
+  private ensureWorker(): WorkerLike {
     if (this.worker) return this.worker;
 
-    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
-    worker.addEventListener('message', (event: MessageEvent<PluginResponse>) => {
-      const { id, ok, result, error } = event.data;
+    const worker = this.spawn();
+    worker.onMessage(({ id, ok, result, error }) => {
       const pending = this.pending.get(id);
       if (!pending) return;
 
@@ -37,8 +90,8 @@ export class PluginHost {
       else pending.reject(new Error(error ?? 'plugin failed'));
     });
 
-    worker.addEventListener('error', (event) => {
-      const failure = new Error(event.message || 'plugin worker crashed');
+    worker.onError((message) => {
+      const failure = new Error(message || 'plugin worker crashed');
       for (const pending of this.pending.values()) pending.reject(failure);
       this.pending.clear();
     });
@@ -47,7 +100,7 @@ export class PluginHost {
     return worker;
   }
 
-  private call(request: WithoutId<PluginRequest>): Promise<PluginResult | undefined> {
+  private post(request: WithoutId<PluginRequest>): Promise<PluginResult | undefined> {
     const id = this.nextId++;
     const worker = this.ensureWorker();
 
@@ -55,6 +108,28 @@ export class PluginHost {
       this.pending.set(id, { resolve, reject });
       worker.postMessage({ ...request, id } as PluginRequest);
     });
+  }
+
+  /**
+   * Sends a request, supplying reference data on demand.
+   *
+   * The worker is asked first and only told what it turns out to be missing.
+   * That keeps the common case — every render after the first — free of a
+   * multi-hundred-kilobyte copy, and means a worker that was restarted refills
+   * itself without anyone tracking its lifetime.
+   */
+  private async call(request: WithoutId<PluginRequest>): Promise<PluginResult | undefined> {
+    try {
+      return await this.post(request);
+    } catch (error) {
+      const hash = 'assetHash' in request ? request.assetHash : undefined;
+      if (!isAssetMissing(error) || hash === undefined || !this.assetSource) throw error;
+
+      const bytes = await this.assetSource(hash);
+      await this.post({ op: 'provideAsset', hash, bytes });
+
+      return await this.post(request);
+    }
   }
 
   async availablePlugins(): Promise<string[]> {
@@ -92,6 +167,7 @@ export class PluginHost {
     seed: Uint8Array;
     moves: Uint8Array[];
     player: number;
+    assetHash?: string;
   }): Promise<PluginView> {
     const result = await this.call({ op: 'view', ...options });
     if (result?.kind !== 'view') throw new Error('unexpected plugin response');
@@ -106,6 +182,7 @@ export class PluginHost {
     moves: Uint8Array[];
     move: Uint8Array;
     player: number;
+    assetHash?: string;
   }): Promise<void> {
     await this.call({ op: 'validate', ...options });
   }
@@ -115,6 +192,10 @@ export class PluginHost {
     this.worker = null;
     this.pending.clear();
   }
+}
+
+function isAssetMissing(error: unknown): boolean {
+  return error instanceof Error && error.message === ASSET_MISSING;
 }
 
 let shared: PluginHost | null = null;

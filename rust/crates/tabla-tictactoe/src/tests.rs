@@ -4,7 +4,7 @@ use tabla_plugin_api::{BytePlugin, PLAYER_CLAIMER, PLAYER_INITIATOR};
 const SEED: [u8; 32] = [0; 32];
 
 fn start() -> State {
-    TicTacToe::setup(&[], &SEED).unwrap()
+    TicTacToe::setup(&[], &SEED, &[]).unwrap()
 }
 
 fn mv(cell: u8) -> Move {
@@ -20,8 +20,8 @@ fn play(cells: &[u8]) -> State {
         } else {
             PLAYER_CLAIMER
         };
-        TicTacToe::validate_move(&state, &mv(cell), player).unwrap();
-        state = TicTacToe::apply_move(state, &mv(cell)).unwrap();
+        TicTacToe::validate_move(&state, &mv(cell), player, &[]).unwrap();
+        state = TicTacToe::apply_move(state, &mv(cell), &[]).unwrap();
     }
     state
 }
@@ -36,11 +36,12 @@ fn a_new_board_is_empty_and_the_initiator_opens() {
 }
 
 #[test]
-fn setup_ignores_config_and_seed_identically() {
-    // A game with no hidden state must not behave differently for different
-    // entropy, or replays would diverge.
-    let a = TicTacToe::setup(b"anything", &[0xAA; 32]).unwrap();
-    let b = TicTacToe::setup(&[], &[0x55; 32]).unwrap();
+fn setup_ignores_config_seed_and_assets_identically() {
+    // A game with no hidden state and no reference data must not behave
+    // differently for different entropy or different assets, or two clients
+    // holding different data would replay to different positions.
+    let a = TicTacToe::setup(b"anything", &[0xAA; 32], b"a whole dictionary").unwrap();
+    let b = TicTacToe::setup(&[], &[0x55; 32], &[]).unwrap();
 
     assert_eq!(a, b);
 }
@@ -59,7 +60,7 @@ fn moving_out_of_turn_is_rejected() {
     let state = start();
 
     assert_eq!(
-        TicTacToe::validate_move(&state, &mv(0), PLAYER_CLAIMER),
+        TicTacToe::validate_move(&state, &mv(0), PLAYER_CLAIMER, &[]),
         Err(PluginError::NotYourTurn)
     );
 }
@@ -69,7 +70,7 @@ fn a_taken_cell_cannot_be_played_again() {
     let state = play(&[4]);
 
     assert_eq!(
-        TicTacToe::validate_move(&state, &mv(4), PLAYER_CLAIMER),
+        TicTacToe::validate_move(&state, &mv(4), PLAYER_CLAIMER, &[]),
         Err(PluginError::IllegalMove {
             reason: "cell is already taken"
         })
@@ -81,13 +82,13 @@ fn a_cell_off_the_board_is_rejected() {
     let state = start();
 
     assert_eq!(
-        TicTacToe::validate_move(&state, &mv(9), PLAYER_INITIATOR),
+        TicTacToe::validate_move(&state, &mv(9), PLAYER_INITIATOR, &[]),
         Err(PluginError::IllegalMove {
             reason: "cell is off the board"
         })
     );
     assert_eq!(
-        TicTacToe::validate_move(&state, &mv(255), PLAYER_INITIATOR),
+        TicTacToe::validate_move(&state, &mv(255), PLAYER_INITIATOR, &[]),
         Err(PluginError::IllegalMove {
             reason: "cell is off the board"
         })
@@ -151,7 +152,7 @@ fn no_move_is_accepted_after_the_game_ends() {
     let state = play(&[0, 3, 1, 4, 2]);
 
     assert_eq!(
-        TicTacToe::validate_move(&state, &mv(5), PLAYER_CLAIMER),
+        TicTacToe::validate_move(&state, &mv(5), PLAYER_CLAIMER, &[]),
         Err(PluginError::GameOver)
     );
 }
@@ -210,11 +211,13 @@ fn both_players_see_the_same_board() {
 fn the_adapter_round_trips_state_through_bytes() {
     let plugin = Plugin::new();
 
-    let state = plugin.setup(&[], &SEED).unwrap();
+    let state = plugin.setup(&[], &SEED, &[]).unwrap();
     let mv = postcard::to_allocvec(&Move { cell: 4 }).unwrap();
 
-    plugin.validate_move(&state, &mv, PLAYER_INITIATOR).unwrap();
-    let next = plugin.apply_move(&state, &mv).unwrap();
+    plugin
+        .validate_move(&state, &mv, PLAYER_INITIATOR, &[])
+        .unwrap();
+    let next = plugin.apply_move(&state, &mv, &[]).unwrap();
 
     assert_ne!(state, next);
     assert_eq!(plugin.is_game_over(&next).unwrap(), None);
@@ -231,7 +234,7 @@ fn the_adapter_reports_its_identity() {
 #[test]
 fn the_adapter_renders_views_as_json() {
     let plugin = Plugin::new();
-    let state = plugin.setup(&[], &SEED).unwrap();
+    let state = plugin.setup(&[], &SEED, &[]).unwrap();
 
     let json = plugin.player_view(&state, PLAYER_INITIATOR).unwrap();
     let text = String::from_utf8(json).unwrap();
@@ -255,7 +258,7 @@ fn replaying_a_move_list_reaches_the_same_position() {
         .map(|&c| postcard::to_allocvec(&Move { cell: c }).unwrap())
         .collect();
 
-    let replayed = plugin.replay(&[], &SEED, &moves).unwrap();
+    let replayed = plugin.replay(&[], &SEED, &moves, &[]).unwrap();
     let expected = postcard::to_allocvec(&play(&cells)).unwrap();
 
     assert_eq!(replayed, expected);
@@ -277,7 +280,7 @@ fn replay_rejects_an_illegal_move_in_the_middle() {
         .collect();
 
     assert_eq!(
-        plugin.replay(&[], &SEED, &moves),
+        plugin.replay(&[], &SEED, &moves, &[]),
         Err(PluginError::IllegalMove {
             reason: "cell is already taken"
         })
@@ -294,7 +297,7 @@ fn replay_refuses_to_continue_past_the_end() {
         .collect();
 
     assert_eq!(
-        plugin.replay(&[], &SEED, &moves),
+        plugin.replay(&[], &SEED, &moves, &[]),
         Err(PluginError::GameOver)
     );
 }
@@ -308,8 +311,8 @@ fn replay_is_deterministic() {
         .collect();
 
     // Different entropy, same result: the two clients cannot desync.
-    let a = plugin.replay(&[], &[0x11; 32], &moves).unwrap();
-    let b = plugin.replay(&[], &[0xEE; 32], &moves).unwrap();
+    let a = plugin.replay(&[], &[0x11; 32], &moves, &[]).unwrap();
+    let b = plugin.replay(&[], &[0xEE; 32], &moves, &[]).unwrap();
 
     assert_eq!(a, b);
 }
