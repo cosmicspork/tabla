@@ -78,7 +78,13 @@ export interface EntryRecord {
 export interface BlobRecord {
   /** Hex SHA-256 of `bytes`, checked before this row was ever written. */
   sha256: string;
-  /** Which plugin's manifest entry brought it in, for removal and totals. */
+  /**
+   * Which manifest entry brought it in, as `id@version`.
+   *
+   * Versioned because two versions of one game are separate downloads that may
+   * share reference data — the word list is the same bytes under both — and
+   * removing one must not take the other's data with it.
+   */
   pluginId: string;
   kind: 'module' | 'asset';
   bytes: Uint8Array;

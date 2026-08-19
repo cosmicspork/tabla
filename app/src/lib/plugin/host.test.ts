@@ -104,6 +104,7 @@ const DICTIONARY = new Uint8Array(1024).fill(7);
 function viewRequest(assetHash?: string) {
   return {
     pluginId: 'letras',
+    pluginVersion: 1,
     config: new Uint8Array(),
     seed: new Uint8Array(32),
     moves: [],

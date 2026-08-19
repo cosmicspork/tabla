@@ -24,7 +24,7 @@ import {
 export type AssetSource = (hash: string) => Promise<Uint8Array>;
 
 /** The same arrangement for a game's rules, which are also fetched and checked. */
-export type ModuleSource = (pluginId: string) => Promise<Uint8Array>;
+export type ModuleSource = (pluginId: string, pluginVersion: number) => Promise<Uint8Array>;
 
 /**
  * `Omit` over a union keeps only the keys every member shares, which would drop
@@ -142,13 +142,14 @@ export class PluginHost {
       try {
         return await this.post(request);
       } catch (error) {
-        const pluginId = 'pluginId' in request ? request.pluginId : undefined;
+        const named = 'pluginId' in request ? request : undefined;
         const hash = 'assetHash' in request ? request.assetHash : undefined;
 
-        if (isMissing(error, MODULE_MISSING) && !suppliedModule && pluginId && this.moduleSource) {
+        if (isMissing(error, MODULE_MISSING) && !suppliedModule && named && this.moduleSource) {
           suppliedModule = true;
-          const bytes = await this.moduleSource(pluginId);
-          await this.post({ op: 'provideModule', pluginId, bytes });
+          const { pluginId, pluginVersion } = named;
+          const bytes = await this.moduleSource(pluginId, pluginVersion);
+          await this.post({ op: 'provideModule', pluginId, pluginVersion, bytes });
           continue;
         }
 
@@ -169,8 +170,8 @@ export class PluginHost {
     return result?.kind === 'strings' ? result.value : [];
   }
 
-  async pluginVersion(pluginId: string): Promise<number> {
-    const result = await this.call({ op: 'pluginVersion', pluginId });
+  async pluginVersion(pluginId: string, pluginVersion: number): Promise<number> {
+    const result = await this.call({ op: 'pluginVersion', pluginId, pluginVersion });
     if (result?.kind !== 'number') throw new Error('unexpected plugin response');
     return result.value;
   }
@@ -182,10 +183,11 @@ export class PluginHost {
    * those bytes get signed into the log and an encoding mismatch would be
    * unrecoverable.
    */
-  async encodeMove(pluginId: string, move: unknown): Promise<Uint8Array> {
+  async encodeMove(pluginId: string, pluginVersion: number, move: unknown): Promise<Uint8Array> {
     const result = await this.call({
       op: 'encodeMove',
       pluginId,
+      pluginVersion,
       json: JSON.stringify(move),
     });
     if (result?.kind !== 'bytes') throw new Error('unexpected plugin response');
@@ -195,6 +197,7 @@ export class PluginHost {
   /** Replays the move list and renders it from one player's point of view. */
   async view(options: {
     pluginId: string;
+    pluginVersion: number;
     config: Uint8Array;
     seed: Uint8Array;
     moves: Uint8Array[];
@@ -209,6 +212,7 @@ export class PluginHost {
   /** Checks a move before it is signed, so illegal moves never enter the log. */
   async validate(options: {
     pluginId: string;
+    pluginVersion: number;
     config: Uint8Array;
     seed: Uint8Array;
     moves: Uint8Array[];

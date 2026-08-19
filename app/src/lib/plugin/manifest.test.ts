@@ -63,7 +63,7 @@ describe('the committed manifest', () => {
     // Two independent pins of the same file: the invite carries one so both
     // players prove they hold the same word list, and the manifest carries the
     // other so the download can be checked. They have to name the same bytes.
-    const letras = await manifestEntry('letras');
+    const letras = await manifestEntry('letras', 2);
     const dictionary = letras?.assets.find((asset) => asset.id === DICTIONARY_EN_V1.id);
 
     expect(dictionary?.sha256).toBe(DICTIONARY_EN_V1.sha256);

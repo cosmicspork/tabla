@@ -29,14 +29,19 @@ export interface PluginView {
 
 export type PluginRequest = { id: number } & (
   | { op: 'availablePlugins' }
-  | { op: 'pluginVersion'; pluginId: string }
-  | { op: 'encodeMove'; pluginId: string; json: string }
+  | { op: 'pluginVersion'; pluginId: string; pluginVersion: number }
+  | { op: 'encodeMove'; pluginId: string; pluginVersion: number; json: string }
   | { op: 'provideAsset'; hash: string; bytes: Uint8Array }
-  | { op: 'provideModule'; pluginId: string; bytes: Uint8Array }
+  | { op: 'provideModule'; pluginId: string; pluginVersion: number; bytes: Uint8Array }
   | {
       op: 'view';
       pluginId: string;
+      pluginVersion: number;
       config: Uint8Array;
+      /**
+       * What this device knows that the log does not say: entropy for a game
+       * that derives its own draws, or the tile values a deal has opened to it.
+       */
       seed: Uint8Array;
       moves: Uint8Array[];
       player: number;
@@ -46,6 +51,7 @@ export type PluginRequest = { id: number } & (
   | {
       op: 'validate';
       pluginId: string;
+      pluginVersion: number;
       config: Uint8Array;
       seed: Uint8Array;
       moves: Uint8Array[];
@@ -54,6 +60,17 @@ export type PluginRequest = { id: number } & (
       assetHash?: string;
     }
 );
+
+/**
+ * How a loaded module is keyed inside the sandbox.
+ *
+ * A version of a game is a different set of rules, so two versions are two
+ * modules and both may be loaded at once — one game in progress under the old
+ * rules, another started under the new.
+ */
+export function moduleKey(pluginId: string, pluginVersion: number): string {
+  return `${pluginId}@${pluginVersion}`;
+}
 
 /**
  * Thrown across the boundary when a request names reference data the worker has

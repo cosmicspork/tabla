@@ -12,9 +12,14 @@
     removePlugin,
     type InstalledState,
   } from '$lib/plugin/install.ts';
-  import { availableGames } from '$lib/registry.ts';
+  import { allGames } from '$lib/registry.ts';
 
-  const games = availableGames().filter((entry) => entry.distribution === 'downloadable');
+  // Every version this build carries, not just the current one: an older
+  // version's files are on the device too, and are the ones a game in progress
+  // is using.
+  const games = allGames().filter((entry) => entry.distribution === 'downloadable');
+
+  const keyOf = (entry: { id: string; version: number }) => `${entry.id}@${entry.version}`;
 
   let states = $state<Record<string, InstalledState>>({});
   let busy = $state<string | null>(null);
@@ -28,7 +33,7 @@
     const next: Record<string, InstalledState> = {};
     for (const entry of games) {
       try {
-        next[entry.id] = await installedState(entry.id);
+        next[keyOf(entry)] = await installedState(entry.id, entry.version);
       } catch {
         // A manifest this build will not trust: say nothing here, because the
         // game itself will explain properly when someone tries to open it.
@@ -37,11 +42,14 @@
     states = next;
   }
 
-  async function act(pluginId: string, action: (id: string) => Promise<void>) {
-    busy = pluginId;
+  async function act(
+    entry: { id: string; version: number },
+    action: (id: string, version: number) => Promise<void>,
+  ) {
+    busy = keyOf(entry);
     failure = null;
     try {
-      await action(pluginId);
+      await action(entry.id, entry.version);
       await refresh();
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
@@ -68,9 +76,9 @@
   {/if}
 
   <ul>
-    {#each games as entry (entry.id)}
-      {@const state = states[entry.id]}
-      <li data-plugin={entry.id}>
+    {#each games as entry (keyOf(entry))}
+      {@const state = states[keyOf(entry)]}
+      <li data-plugin={entry.id} data-version={entry.version}>
         <div>
           <span>{entry.title}</span>
           <span class="muted size" data-size={state?.storedBytes ?? 0}>
@@ -85,12 +93,12 @@
         </div>
 
         {#if state?.installed}
-          <button disabled={busy === entry.id} onclick={() => act(entry.id, removePlugin)}>
+          <button disabled={busy === keyOf(entry)} onclick={() => act(entry, removePlugin)}>
             Remove
           </button>
         {:else if state}
-          <button disabled={busy === entry.id} onclick={() => act(entry.id, installPlugin)}>
-            {busy === entry.id ? 'Downloading…' : 'Download'}
+          <button disabled={busy === keyOf(entry)} onclick={() => act(entry, installPlugin)}>
+            {busy === keyOf(entry) ? 'Downloading…' : 'Download'}
           </button>
         {/if}
       </li>

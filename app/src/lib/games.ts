@@ -13,7 +13,7 @@ import { getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { requestPersistentStorage } from './lifecycle.ts';
-import { gameEntry } from './registry.ts';
+import { gameEntry, latestGame } from './registry.ts';
 import { claimInvite, createInvite, inviteStatus } from './relay.ts';
 
 export interface CreatedInvite {
@@ -37,8 +37,12 @@ export interface CreatedInvite {
 export async function createGame(
   origin: string,
   pluginId: string = CORE_PLUGIN_ID,
+  version?: number,
 ): Promise<CreatedInvite> {
-  const entry = gameEntry(pluginId);
+  // New games take the newest rules this build has. A version can be named
+  // explicitly, which is how a test pins itself to rules that have since been
+  // replaced.
+  const entry = version === undefined ? latestGame(pluginId) : gameEntry(pluginId, version);
   if (!entry) throw new Error(`unknown game: ${pluginId}`);
 
   const { core, identity } = await loadIdentity();
@@ -144,7 +148,9 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
 
   const invite = core.openInvite(key, fromBase64Url(blob));
   const now = Date.now();
-  const entry = gameEntry(invite.pluginId);
+  // The invite names its version, and only that version will do — different
+  // rules on the two devices is the one failure there is no recovering from.
+  const entry = gameEntry(invite.pluginId, invite.pluginVersion);
 
   const dictionaryHash = invite.dictionaryHash;
   const game: GameRecord = {

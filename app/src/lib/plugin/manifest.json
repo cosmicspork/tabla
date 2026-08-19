@@ -3,6 +3,23 @@
   "plugins": [
     {
       "id": "letras",
+      "version": 2,
+      "module": {
+        "path": "/plugins/letras-v2.wasm",
+        "sha256": "cf73235dcdabcc5a1b316e4c611b429499fdd25e0c32ba15b1b12ede2d35e960",
+        "bytes": 197037
+      },
+      "assets": [
+        {
+          "id": "en-v1",
+          "path": "/dict/en-v1.dawg",
+          "sha256": "492410d02d6c346bba503cae0483202554d1d36f8e8c5a3d21faa956398a2346",
+          "bytes": 491928
+        }
+      ]
+    },
+    {
+      "id": "letras",
       "version": 1,
       "module": {
         "path": "/plugins/letras-v1.wasm",

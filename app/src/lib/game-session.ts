@@ -215,11 +215,16 @@ export class GameSession {
   async play(move: unknown): Promise<void> {
     const replay = this.log.replay(this.session);
     const moves = [...replay.moves];
-    const encoded = await pluginHost().encodeMove(this.game.pluginId, move);
+    const encoded = await pluginHost().encodeMove(
+      this.game.pluginId,
+      this.game.pluginVersion,
+      move,
+    );
 
     const config = replay.config ?? new Uint8Array();
     await pluginHost().validate({
       pluginId: this.game.pluginId,
+      pluginVersion: this.game.pluginVersion,
       config,
       seed: fromBase64Url(this.game.seed),
       moves,
@@ -272,6 +277,7 @@ export class GameSession {
     const config = replay.config ?? new Uint8Array();
     const { view, outcome } = await pluginHost().view({
       pluginId: this.game.pluginId,
+      pluginVersion: this.game.pluginVersion,
       config,
       seed: fromBase64Url(this.game.seed),
       moves: [...replay.moves],
