@@ -89,6 +89,18 @@ impl Identity {
         Ok(invite::sign_claim(&self.inner, &blob_id).to_vec())
     }
 
+    /// This device's private entropy for one game's hidden draws.
+    ///
+    /// Derived rather than stored, so a restored backup rebuilds a half-played
+    /// rack from the log alone. Handed to the game plugin as its seed; published
+    /// by the plugin when the game ends so the opponent can audit every draw,
+    /// which it can do without learning anything about the identity key.
+    #[wasm_bindgen(js_name = deriveDrawSeed)]
+    pub fn derive_draw_seed(&self, game_id: &[u8]) -> Result<Vec<u8>, JsError> {
+        let game_id = fixed::<GAME_ID_LEN>(game_id, "gameId")?;
+        Ok(self.inner.draw_seed(&game_id).to_vec())
+    }
+
     /// Derives the symmetric key protecting one game's entries.
     #[wasm_bindgen(js_name = agreeGameKey)]
     pub fn agree_game_key(

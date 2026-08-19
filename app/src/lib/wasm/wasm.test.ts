@@ -19,6 +19,8 @@ const BLOB_ID = new TextEncoder().encode('tabla-golden-b01');
 const A_PUB = 'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737';
 const B_PUB = 'a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0';
 const GAME_KEY = 'd025583f6bcabb5464fbd2ea9d3a96292b64e97606452b70f7cdd30130eb1c78';
+const A_DRAW = '603b9525971b7038aa85f1b7ef2f3f417663c25acb08ff8b328f75dac726e549';
+const B_DRAW = '89c3e94c7f40fd1bb1c05223dab174817ff8f41785746eecabadf9c149ef2cf6';
 
 function hex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -42,6 +44,14 @@ describe('core module', () => {
 
     expect(hex(fromAlice)).toBe(GAME_KEY);
     expect(hex(fromBob)).toBe(GAME_KEY);
+  });
+
+  it('derives the frozen per-game draw seeds', () => {
+    // Frozen in golden_crypto.rs. A game with a tile bag reconstructs a
+    // half-played rack from this value, so a device that computed it
+    // differently would restore a backup into the wrong hand.
+    expect(hex(new core.Identity(ALICE_SEED).deriveDrawSeed(GAME_ID))).toBe(A_DRAW);
+    expect(hex(new core.Identity(BOB_SEED).deriveDrawSeed(GAME_ID))).toBe(B_DRAW);
   });
 
   it('rejects byte strings of the wrong length instead of truncating them', () => {

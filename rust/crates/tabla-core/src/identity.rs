@@ -5,10 +5,15 @@
 //! nothing but a public key you have met before.
 
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use hkdf::Hkdf;
+use sha2::Sha256;
 
 use crate::error::CryptoError;
 use crate::log::key_hash;
-use crate::{HASH_LEN, PUBKEY_LEN, SEED_LEN, SIG_LEN};
+use crate::{GAME_ID_LEN, HASH_LEN, PUBKEY_LEN, SEED_LEN, SIG_LEN};
+
+/// Domain tag separating draw entropy from every other use of the identity key.
+pub const DRAW_SEED_DOMAIN: &[u8] = b"tabla/draw-seed/v1";
 
 /// An installation's identity keypair.
 ///
@@ -56,6 +61,27 @@ impl Identity {
 
     pub fn sign(&self, message: &[u8]) -> [u8; SIG_LEN] {
         self.signing.sign(message).to_bytes()
+    }
+
+    /// This device's private entropy for one game's hidden draws.
+    ///
+    /// A game with hidden state — a tile bag — needs a secret that fixes what
+    /// this player will draw before they can see anything that might tempt them
+    /// to choose. It is **derived rather than stored**: a backup already carries
+    /// the identity seed, so a restored device recomputes exactly the same value
+    /// and can rebuild a half-played rack from the log alone. There is no second
+    /// secret to remember to export.
+    ///
+    /// This value is published at the end of the game so the opponent can audit
+    /// every draw, which is why it is an HKDF extraction rather than the seed
+    /// itself: revealing it says nothing about the identity key, and the domain
+    /// tag means it can never be mistaken for a key agreed for something else.
+    pub fn draw_seed(&self, game_id: &[u8; GAME_ID_LEN]) -> [u8; SEED_LEN] {
+        let hk = Hkdf::<Sha256>::new(Some(DRAW_SEED_DOMAIN), &self.seed());
+        let mut okm = [0u8; SEED_LEN];
+        hk.expand(game_id, &mut okm)
+            .expect("32 bytes is a valid HKDF-SHA256 output length");
+        okm
     }
 }
 

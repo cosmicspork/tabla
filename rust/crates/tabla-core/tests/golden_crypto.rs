@@ -27,6 +27,23 @@ fn identity_public_keys_are_byte_stable() {
 }
 
 #[test]
+fn draw_seeds_are_byte_stable_and_private_to_each_player() {
+    // A game with hidden state derives its draws from this value, so a change
+    // here would make a restored device disagree with its own half-played rack.
+    assert_eq!(hex::encode(alice().draw_seed(&GAME)), A_DRAW);
+    assert_eq!(hex::encode(bob().draw_seed(&GAME)), B_DRAW);
+
+    // Different players, and different games for one player, must never share
+    // draw entropy: the whole point is that neither side can predict the other.
+    assert_ne!(alice().draw_seed(&GAME), bob().draw_seed(&GAME));
+    assert_ne!(alice().draw_seed(&GAME), alice().draw_seed(&BLOB));
+
+    // And it must not be the identity seed under another name: this value is
+    // published when the game ends.
+    assert_ne!(alice().draw_seed(&GAME), alice().seed());
+}
+
+#[test]
 fn the_ecdh_shared_secret_is_byte_stable() {
     assert_eq!(
         hex::encode(shared_secret(&alice(), &bob().verifying_key())),
@@ -74,6 +91,9 @@ fn a_frozen_invite_blob_still_opens() {
     assert_eq!(cfg.initiator_pub_key, alice().public_key());
     assert_eq!(cfg.created_at, 1_780_000_000);
 }
+
+const A_DRAW: &str = "603b9525971b7038aa85f1b7ef2f3f417663c25acb08ff8b328f75dac726e549";
+const B_DRAW: &str = "89c3e94c7f40fd1bb1c05223dab174817ff8f41785746eecabadf9c149ef2cf6";
 
 const A_PUB: &str = "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737";
 const B_PUB: &str = "a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0";
