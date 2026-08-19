@@ -1,0 +1,16 @@
+{
+  "name": "tabla",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "app",
+    "shared",
+    "worker"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+.svelte-kit/
+.wrangler/
+target/
+app/src/lib/wasm/pkg/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+.vitest-pool-workers/
+test-results/
+playwright-report/

@@ -1,0 +1,11 @@
+[package]
+name = "tabla-plugin-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure-function game plugin interface for tabla"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.1", features = ["alloc"] }

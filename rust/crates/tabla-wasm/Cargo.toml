@@ -1,0 +1,16 @@
+[package]
+name = "tabla-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "wasm-bindgen surface exposing tabla-core and bundled game plugins to the PWA"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tabla-core.workspace = true
+tabla-plugin-api.workspace = true
+tabla-tictactoe.workspace = true
+wasm-bindgen.workspace = true

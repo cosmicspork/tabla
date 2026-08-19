@@ -1,0 +1,12 @@
+[package]
+name = "tabla-tictactoe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Tic tac toe game plugin for tabla"
+
+[dependencies]
+tabla-plugin-api.workspace = true
+serde = { version = "1.0", features = ["derive"] }
+postcard = { version = "1.1", features = ["alloc"] }

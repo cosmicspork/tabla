@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tabla",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+
+  // The built SvelteKit SPA is served from this same Worker, so the app, the
+  // invite API, and the game WebSocket all share one origin. Only the two
+  // dynamic prefixes hit Worker code; everything else is a static asset, and
+  // unknown paths fall back to index.html for client-side routing.
+  "assets": {
+    "directory": "../app/build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/ws/*"]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "GAME_ROOMS", "class_name": "GameRoomDO" },
+      { "name": "INVITES", "class_name": "PendingInviteDO" }
+    ]
+  },
+
+  // SQLite-backed storage is required for new namespaces and is what the free
+  // plan supports. The backend cannot be changed after the first deploy.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GameRoomDO", "PendingInviteDO"]
+    }
+  ],
+
+  "observability": { "enabled": true },
+
+  "vars": {
+    // Enables the dev-only storage-wipe endpoint used by the acceptance test.
+    // Never set this in production.
+    "TABLA_TEST_ENDPOINTS": "false",
+    "VAPID_SUBJECT": "mailto:tabla@example.invalid"
+  }
+}
