@@ -1,7 +1,13 @@
 /**
  * Creating and joining games: the invite protocol as the app performs it.
  */
-import { BLOB_ID_LEN, CORE_PLUGIN_ID, GAME_ID_LEN, fromBase64Url, toBase64Url } from '@tabla/shared';
+import {
+  BLOB_ID_LEN,
+  CORE_PLUGIN_ID,
+  GAME_ID_LEN,
+  fromBase64Url,
+  toBase64Url,
+} from '@tabla/shared';
 
 import { getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
@@ -45,8 +51,7 @@ export async function createGame(
   // A game with hidden state derives its own entropy per device, so that
   // neither player can work out the other's tiles. The invite's seed is only
   // for games where both sides may hold the same value.
-  const seed =
-    entry.seed === 'draw' ? identity.deriveDrawSeed(gameId) : randomBytes(32);
+  const seed = entry.seed === 'draw' ? identity.deriveDrawSeed(gameId) : randomBytes(32);
 
   const blob = core.sealInvite(
     blobKey,
@@ -162,7 +167,11 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
 
   const compatible =
     entry !== undefined &&
-    invite.isCompatible(entry.id, entry.version, entry.dictionary ? fromHex(entry.dictionary) : undefined);
+    invite.isCompatible(
+      entry.id,
+      entry.version,
+      entry.dictionary ? fromHex(entry.dictionary) : undefined,
+    );
 
   if (!compatible) {
     await putGame({ ...game, status: 'incompatible' });

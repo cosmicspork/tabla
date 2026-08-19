@@ -19,7 +19,15 @@ crate-type = ["cdylib", "rlib"]
 # to keep it.
 [dependencies]
 tabla-plugin-api.workspace = true
-tabla-tictactoe.workspace = true
-tabla-letras.workspace = true
+tabla-tictactoe = { workspace = true, optional = true }
+tabla-letras = { workspace = true, optional = true }
 wasm-bindgen.workspace = true
 js-sys = "0.3"
+
+# Which games this binary can play is a build-time choice, so that a module
+# shipped for one game carries no code for any other. The default is the module
+# the app bundles; a downloadable one is built with a single game selected.
+[features]
+default = ["tictactoe", "letras"]
+tictactoe = ["dep:tabla-tictactoe"]
+letras = ["dep:tabla-letras"]

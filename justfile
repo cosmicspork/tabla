@@ -97,6 +97,11 @@ fmt:
 
 check:
     cd rust && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings
+    # Each game must also build on its own: a downloadable plugin module is the
+    # same crate with one game selected, so a game that only compiles alongside
+    # its neighbours would break that build and nothing else would notice.
+    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features tictactoe
+    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features letras
     cd app && bun run check
 
 # Deploy the Worker and static assets to Cloudflare

@@ -21,16 +21,30 @@
 use tabla_plugin_api::{BytePlugin, GamePlugin, Outcome, PlayerId, PluginError};
 use wasm_bindgen::prelude::*;
 
-/// Every plugin bundled into the core app.
+/// Every plugin compiled into this module.
+///
+/// Which games those are is a build-time choice — see this crate's cargo
+/// features. A module built for one game carries no code for any other, so
+/// "this build cannot play that" is a fact about the binary rather than a
+/// check someone could skip.
 fn lookup(plugin_id: &str) -> Result<&'static dyn BytePlugin, JsError> {
-    const TICTACTOE: tabla_tictactoe::Plugin = tabla_tictactoe::Plugin::new();
-    const LETRAS: tabla_letras::Plugin = tabla_letras::Plugin::new();
-
-    match plugin_id {
-        tabla_tictactoe::TicTacToe::ID => Ok(&TICTACTOE),
-        tabla_letras::Letras::ID => Ok(&LETRAS),
-        other => Err(JsError::new(&format!("unknown plugin: {other}"))),
+    #[cfg(feature = "tictactoe")]
+    {
+        const TICTACTOE: tabla_tictactoe::Plugin = tabla_tictactoe::Plugin::new();
+        if plugin_id == tabla_tictactoe::TicTacToe::ID {
+            return Ok(&TICTACTOE);
+        }
     }
+
+    #[cfg(feature = "letras")]
+    {
+        const LETRAS: tabla_letras::Plugin = tabla_letras::Plugin::new();
+        if plugin_id == tabla_letras::Letras::ID {
+            return Ok(&LETRAS);
+        }
+    }
+
+    Err(JsError::new(&format!("unknown plugin: {plugin_id}")))
 }
 
 fn seed32(seed: &[u8]) -> Result<[u8; 32], JsError> {
@@ -45,10 +59,15 @@ fn plugin_err(e: PluginError) -> JsError {
 /// Plugin identifiers this module can play.
 #[wasm_bindgen]
 pub fn available_plugins() -> Vec<String> {
-    vec![
-        tabla_letras::Letras::ID.to_string(),
-        tabla_tictactoe::TicTacToe::ID.to_string(),
+    [
+        #[cfg(feature = "letras")]
+        tabla_letras::Letras::ID,
+        #[cfg(feature = "tictactoe")]
+        tabla_tictactoe::TicTacToe::ID,
     ]
+    .iter()
+    .map(|id| id.to_string())
+    .collect()
 }
 
 /// The rules version for a plugin. Clients refuse to start or resume a game
@@ -153,4 +172,34 @@ pub fn replay(
     lookup(plugin_id)?
         .replay(config, &seed32(seed)?, &moves, assets)
         .map_err(plugin_err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The list and the build agree, whichever games this build was given.
+    ///
+    /// Only the happy path is exercised here: rejecting an absent game means
+    /// constructing a `JsError`, which is a browser type. That half is checked
+    /// against the real artifact in `app/src/lib/plugin/artifact.test.ts`.
+    #[test]
+    fn lists_the_games_compiled_in() {
+        let ids = available_plugins();
+
+        assert_eq!(
+            ids.iter().any(|id| id == "tictactoe"),
+            cfg!(feature = "tictactoe")
+        );
+        assert_eq!(
+            ids.iter().any(|id| id == "letras"),
+            cfg!(feature = "letras")
+        );
+
+        #[cfg(feature = "tictactoe")]
+        assert!(lookup("tictactoe").is_ok());
+
+        #[cfg(feature = "letras")]
+        assert!(lookup("letras").is_ok());
+    }
 }

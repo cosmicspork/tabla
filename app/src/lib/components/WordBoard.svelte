@@ -136,8 +136,7 @@
       row: Math.floor(cell / SIZE),
       col: cell % SIZE,
       tile: rack[index] === '?' ? 0 : rack.charCodeAt(index) - 96,
-      blankAs:
-        rack[index] === '?' ? (blankLetters.get(cell) ?? 'e').charCodeAt(0) - 96 : null,
+      blankAs: rack[index] === '?' ? (blankLetters.get(cell) ?? 'e').charCodeAt(0) - 96 : null,
     }));
   }
 
@@ -282,7 +281,8 @@
   {#if exchanging}
     <div class="actions">
       <button class="primary" onclick={confirmExchange} disabled={discards.size === 0 || busy}>
-        Swap {discards.size} {discards.size === 1 ? 'tile' : 'tiles'}
+        Swap {discards.size}
+        {discards.size === 1 ? 'tile' : 'tiles'}
       </button>
       <button onclick={() => ((exchanging = false), (discards = new Set()))}>Cancel</button>
     </div>
