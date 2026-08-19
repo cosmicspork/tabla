@@ -97,7 +97,9 @@ export function db(): Promise<TablaDatabase> {
       const games = database.createObjectStore('games', { keyPath: 'gameId' });
       games.createIndex('byLastActivity', 'lastActivity');
 
-      const entries = database.createObjectStore('entries', { keyPath: ['gameId', 'seq'] });
+      const entries = database.createObjectStore('entries', {
+        keyPath: ['gameId', 'seq'],
+      });
       entries.createIndex('byGame', 'gameId');
 
       database.createObjectStore('contacts', { keyPath: 'publicKey' });

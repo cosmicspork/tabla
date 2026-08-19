@@ -47,8 +47,8 @@ const bytes = (base64url: string) => [...fromBase64Url(base64url)];
 export async function exportBackup(passphrase: string): Promise<Uint8Array> {
   const { core, identity } = await loadIdentity();
 
-  const games = (await listGames()).filter(
-    (game): game is GameRecord & { claimerPubKey: string } => Boolean(game.claimerPubKey),
+  const games = (await listGames()).filter((game): game is GameRecord & { claimerPubKey: string } =>
+    Boolean(game.claimerPubKey),
   );
 
   const bundle: BundleJson = {
@@ -90,10 +90,7 @@ export interface ImportSummary {
  * be able to sign as the same player, and their logs would fork the moment both
  * moved — so an import is a migration, not a merge, and it overwrites.
  */
-export async function importBackup(
-  passphrase: string,
-  file: Uint8Array,
-): Promise<ImportSummary> {
+export async function importBackup(passphrase: string, file: Uint8Array): Promise<ImportSummary> {
   const { core } = await loadIdentity();
   const bundle = JSON.parse(core.importBundle(passphrase, file)) as BundleJson;
 
@@ -147,12 +144,18 @@ export async function importBackup(
   await tx.done;
   await replaceIdentity(seed);
 
-  return { games: bundle.games.length, contacts: bundle.contacts.length, publicKey: mine };
+  return {
+    games: bundle.games.length,
+    contacts: bundle.contacts.length,
+    publicKey: mine,
+  };
 }
 
 /** Offers the backup as a download. */
 export function downloadBackup(file: Uint8Array, name: string): void {
-  const blob = new Blob([file as BlobPart], { type: 'application/octet-stream' });
+  const blob = new Blob([file as BlobPart], {
+    type: 'application/octet-stream',
+  });
   const url = URL.createObjectURL(blob);
 
   const anchor = document.createElement('a');

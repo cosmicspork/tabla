@@ -25,7 +25,10 @@ export function randomBytes(length: number): Uint8Array {
  * because backup and device migration have to be able to export it — a key that
  * cannot leave the device would strand every game on it. See ARCHITECTURE.md.
  */
-export async function loadIdentity(): Promise<{ core: CoreModule; identity: Identity }> {
+export async function loadIdentity(): Promise<{
+  core: CoreModule;
+  identity: Identity;
+}> {
   if (cached) return cached;
 
   const core = await loadCore();

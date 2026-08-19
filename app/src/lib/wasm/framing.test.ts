@@ -37,7 +37,10 @@ function hex(bytes: Uint8Array): string {
 }
 
 /** A real signed chain, built by the Rust core exactly as a client would. */
-function realChain(count: number): { entries: Uint8Array[]; tipHash: Uint8Array } {
+function realChain(count: number): {
+  entries: Uint8Array[];
+  tipHash: Uint8Array;
+} {
   const key = alice.agreeGameKey(bob.publicKey(), GAME_ID, GAME_ID);
   const session = new core.Session(GAME_ID, key, alice.publicKey(), bob.publicKey());
   const log = new core.Log(GAME_ID, alice.publicKey(), bob.publicKey());

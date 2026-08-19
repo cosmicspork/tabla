@@ -91,7 +91,10 @@ export function parseInviteFragment(fragment: string): { blobId: string; key: Ui
 
 export type JoinResult =
   | { ok: true; game: GameRecord }
-  | { ok: false; reason: 'taken' | 'expired' | 'missing' | 'incompatible' | 'malformed' };
+  | {
+      ok: false;
+      reason: 'taken' | 'expired' | 'missing' | 'incompatible' | 'malformed';
+    };
 
 /**
  * Redeems an invite link.

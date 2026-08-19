@@ -24,8 +24,8 @@
   <div>
     <h2>Invite someone</h2>
     <p class="muted">
-      This link works once. Whoever opens it first becomes your opponent, and every later attempt
-      is refused.
+      This link works once. Whoever opens it first becomes your opponent, and every later attempt is
+      refused.
     </p>
   </div>
 
@@ -42,8 +42,8 @@
   </div>
 
   <p class="muted small">
-    The part of the link after <code>#</code> is the key. Browsers never send it to a server, so the
-    relay stores an invite it cannot read.
+    The part of the link after <code>#</code> is the key. Browsers never send it to a server, so the relay
+    stores an invite it cannot read.
   </p>
 </div>
 

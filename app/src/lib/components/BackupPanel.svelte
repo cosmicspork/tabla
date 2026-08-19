@@ -16,7 +16,10 @@
 
   async function save() {
     if (exportPassphrase.length < 8) {
-      message = { kind: 'warn', text: 'Use at least 8 characters — this protects your identity key.' };
+      message = {
+        kind: 'warn',
+        text: 'Use at least 8 characters — this protects your identity key.',
+      };
       return;
     }
 
@@ -67,8 +70,8 @@
   <div>
     <h2>Back up your games</h2>
     <p class="muted">
-      The backup holds your games <em>and</em> your identity key. Without the key the games cannot
-      be read at all, so the two travel together — and the file is worth protecting accordingly.
+      The backup holds your games <em>and</em> your identity key. Without the key the games cannot be
+      read at all, so the two travel together — and the file is worth protecting accordingly.
     </p>
   </div>
 
@@ -114,9 +117,7 @@
   </label>
 
   {#if confirmingImport}
-    <p class="notice warn">
-      This will replace everything on this device. Continue?
-    </p>
+    <p class="notice warn">This will replace everything on this device. Continue?</p>
     <div class="row">
       <button class="danger" onclick={restore} disabled={busy}>
         {busy ? 'Restoring…' : 'Yes, replace this device'}

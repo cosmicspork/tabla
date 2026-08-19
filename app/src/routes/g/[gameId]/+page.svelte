@@ -118,7 +118,8 @@
     if (board.pending > 0) return 'Saved on this device — will sync when you are back online.';
     if (board.status === 'offline') return 'Offline. Your moves are safe on this device.';
     if (board.status === 'refused') return 'The relay refused something. Your log is unchanged.';
-    if (board.status === 'diverged') return 'The relay holds a different history. Nothing accepted.';
+    if (board.status === 'diverged')
+      return 'The relay holds a different history. Nothing accepted.';
     return '';
   });
 </script>
@@ -157,8 +158,9 @@
   {/if}
 
   <div class="notify">
-    <NotifyPrompt onsubscribe={(subscription: PushSubscriptionJson) =>
-      session?.subscribeToPush(subscription)} />
+    <NotifyPrompt
+      onsubscribe={(subscription: PushSubscriptionJson) => session?.subscribeToPush(subscription)}
+    />
   </div>
 {:else if !failure}
   <h1>Loading…</h1>

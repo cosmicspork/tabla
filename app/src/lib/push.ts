@@ -56,7 +56,9 @@ async function vapidPublicKey(): Promise<string | null> {
 
   try {
     const response = await fetch('/api/vapid');
-    const { publicKey } = (await response.json()) as { publicKey: string | null };
+    const { publicKey } = (await response.json()) as {
+      publicKey: string | null;
+    };
     cachedKey = publicKey;
   } catch {
     cachedKey = null;

@@ -96,11 +96,7 @@ export async function loadEntries(gameId: string): Promise<Uint8Array[]> {
  * This is what turns invite links into a bootstrap rather than the ongoing
  * flow: the second game with the same person starts from a contact picker.
  */
-export async function rememberContact(
-  publicKey: string,
-  name: string,
-  now: number,
-): Promise<void> {
+export async function rememberContact(publicKey: string, name: string, now: number): Promise<void> {
   const database = await db();
   const existing = await database.get('contacts', publicKey);
 

@@ -17,12 +17,7 @@ import {
   serverMessageSchema,
   toBase64Url,
 } from '@tabla/shared';
-import type {
-  ClientMessage,
-  PushSubscriptionJson,
-  ServerMessage,
-  Tombstone,
-} from '@tabla/shared';
+import type { ClientMessage, PushSubscriptionJson, ServerMessage, Tombstone } from '@tabla/shared';
 
 import type { CoreModule, Identity, Log } from '../wasm/core.ts';
 
@@ -37,13 +32,7 @@ export interface SocketLike {
 export type Transport = (gameId: string) => Promise<SocketLike>;
 
 export type SyncStatus =
-  | 'idle'
-  | 'connecting'
-  | 'syncing'
-  | 'synced'
-  | 'offline'
-  | 'diverged'
-  | 'refused';
+  'idle' | 'connecting' | 'syncing' | 'synced' | 'offline' | 'diverged' | 'refused';
 
 export interface SyncEvents {
   /** New verified entries landed. The UI should re-render. */
