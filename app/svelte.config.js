@@ -16,14 +16,16 @@ export default {
     // Registered automatically. It caches the app shell only; game data lives
     // in IndexedDB and is never written to a cache.
     //
-    // Dictionaries are excluded from the install-time precache: they are half a
-    // megabyte each and only matter to people who play the word game, so making
-    // every visitor download one before the app will start would be a poor
-    // trade. They are fetched on first use and kept by the runtime cache from
-    // then on, so a game stays playable offline after one online session.
+    // Downloadable games and their word lists are excluded from the
+    // install-time precache. They are hundreds of kilobytes each and matter
+    // only to the people who play those games, so making every visitor take
+    // one before the app will start would be a poor trade. They are fetched on
+    // first use, checked against the signed manifest, and kept in the database
+    // — which, unlike a cache, survives an app update and can be given back
+    // when a player removes the game.
     serviceWorker: {
       register: true,
-      files: (path) => !path.startsWith('dict/'),
+      files: (path) => !path.startsWith('dict/') && !path.startsWith('plugins/'),
     },
     alias: { $shared: '../shared/src' },
   },

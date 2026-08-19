@@ -49,6 +49,18 @@ worker.addEventListener('fetch', (event) => {
   event.respondWith(serve(request, url));
 });
 
+/**
+ * Downloaded games and their word lists, which the page keeps itself.
+ *
+ * Caching them here too would store more than a megabyte twice, lose it on
+ * every app update — this cache is dropped whenever a new version activates —
+ * and leave a copy behind after a player removed the game to get the space
+ * back. The page stores them in IndexedDB instead, where none of that is true.
+ */
+function ownedByThePage(pathname: string): boolean {
+  return pathname.startsWith('/dict/') || pathname.startsWith('/plugins/');
+}
+
 async function serve(request: Request, url: URL): Promise<Response> {
   const cache = await caches.open(CACHE);
 
@@ -60,7 +72,7 @@ async function serve(request: Request, url: URL): Promise<Response> {
 
   try {
     const response = await fetch(request);
-    if (response.ok && response.type === 'basic') {
+    if (response.ok && response.type === 'basic' && !ownedByThePage(url.pathname)) {
       cache.put(request, response.clone()).catch(() => {});
     }
     return response;
