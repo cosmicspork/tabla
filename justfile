@@ -68,6 +68,10 @@ test-ts: types
     cd worker && bun run test
     cd app && bun run test
 
+# Browser acceptance tests against the built app served by the Worker
+test-e2e: build
+    cd e2e && bunx playwright test
+
 # Everything
 test: test-rust test-ts
 

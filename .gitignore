@@ -12,5 +12,7 @@ worker/worker-configuration.d.ts
 .env.*
 !.env.example
 .vitest-pool-workers/
+e2e/test-results/
+e2e/playwright-report/
 test-results/
 playwright-report/
