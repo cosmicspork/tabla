@@ -198,7 +198,12 @@
   </p>
 {:else if board?.ready && Board}
   <h1>{titleOf(game?.pluginId ?? '')}</h1>
-  <p class="status">{statusLine}</p>
+  <p class="status">
+    {statusLine}
+    {#if board.opponentPresent && !board.outcome}
+      <span class="presence" data-present="true">Your opponent is here.</span>
+    {/if}
+  </p>
 
   <Board {board} {onplay} />
 
@@ -236,6 +241,12 @@
   .status {
     font-size: 1.05rem;
     margin-bottom: 0;
+  }
+
+  .presence {
+    font-size: 0.85rem;
+    opacity: 0.7;
+    margin-left: 0.5rem;
   }
 
   .notify {

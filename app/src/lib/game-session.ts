@@ -36,6 +36,14 @@ export interface BoardState {
   /** How many entries the relay has yet to confirm. */
   pending: number;
   status: SyncStatus;
+  /**
+   * Whether the opponent is connected right now.
+   *
+   * Nothing depends on this — a game plays exactly the same either way — but
+   * knowing someone is at the other end changes how long a person is willing
+   * to sit and wait for their move.
+   */
+  opponentPresent: boolean;
 }
 
 export class GameSession {
@@ -118,6 +126,7 @@ export class GameSession {
         this.syncStatus = status;
         void this.notify();
       },
+      onPresence: () => void this.notify(),
       onError: (code, detail) => {
         this.lastError = detail ?? code;
         void this.notify();
@@ -251,6 +260,7 @@ export class GameSession {
       player: this.player,
       pending: this.engine?.pendingCount ?? 0,
       status: this.syncStatus,
+      opponentPresent: this.engine?.opponentPresent ?? false,
     };
 
     // Sequence 0 is the claimer's join and sequence 1 the initiator's setup.
@@ -283,6 +293,7 @@ export class GameSession {
       player: this.player,
       pending: this.engine?.pendingCount ?? 0,
       status: this.syncStatus,
+      opponentPresent: this.engine?.opponentPresent ?? false,
     };
   }
 

@@ -38,6 +38,8 @@ export interface SyncEvents {
   /** New verified entries landed. The UI should re-render. */
   onEntries?: (log: Log) => void;
   onStatus?: (status: SyncStatus, detail?: string) => void;
+  /** The opponent connected or disconnected. */
+  onPresence?: (present: boolean) => void;
   /** The relay rejected something, or offered a history we refuse. */
   onError?: (code: string, detail?: string) => void;
 }
@@ -63,6 +65,7 @@ export class SyncEngine {
   private socket: SocketLike | null = null;
   private log: Log;
   private statusValue: SyncStatus = 'idle';
+  private opponentPresentValue = false;
 
   /** Highest sequence the relay has confirmed holding. -1 means none. */
   private relayTipSeq = -1;
@@ -89,6 +92,17 @@ export class SyncEngine {
     return Math.max(0, this.tipSeq - this.relayTipSeq);
   }
 
+  /** Whether the opponent has a live socket on this game. */
+  get opponentPresent(): boolean {
+    return this.opponentPresentValue;
+  }
+
+  private setPresence(present: boolean): void {
+    if (present === this.opponentPresentValue) return;
+    this.opponentPresentValue = present;
+    this.events.onPresence?.(present);
+  }
+
   private setStatus(status: SyncStatus, detail?: string): void {
     this.statusValue = status;
     this.events.onStatus?.(status, detail);
@@ -107,6 +121,8 @@ export class SyncEngine {
     });
     socket.addEventListener('close', () => {
       this.socket = null;
+      // Our own socket is gone, so we no longer know anything about theirs.
+      this.setPresence(false);
       // Offline is a normal state for a correspondence game, not a failure.
       if (this.statusValue !== 'diverged' && this.statusValue !== 'refused') {
         this.setStatus('offline');
@@ -129,6 +145,7 @@ export class SyncEngine {
   disconnect(): void {
     this.socket?.close(1000, 'client closing');
     this.socket = null;
+    this.setPresence(false);
     this.setStatus('idle');
   }
 
@@ -195,6 +212,8 @@ export class SyncEngine {
         return this.onEntries(message.data);
       case 'appended':
         return this.onAppended(message.data);
+      case 'presence':
+        return this.setPresence(message.data.others > 0);
       case 'err':
         this.events.onError?.(message.data.code, message.data.detail);
         this.setStatus('refused', message.data.detail);

@@ -241,6 +241,53 @@ describe('two clients playing through the relay', () => {
   });
 });
 
+describe('presence', () => {
+  it('tells each player when the other is connected, and when they leave', async () => {
+    const { alice, bob } = makeGame('sync-presence-01');
+
+    await alice.engine.connect();
+    await settle();
+
+    // Alone in the room: nobody to be present.
+    expect(alice.engine.opponentPresent).toBe(false);
+
+    await bob.engine.connect();
+    await settle();
+
+    // Bob's hello tells Alice as much as it tells Bob.
+    expect(alice.engine.opponentPresent).toBe(true);
+    expect(bob.engine.opponentPresent).toBe(true);
+
+    bob.engine.disconnect();
+    await settle();
+
+    expect(alice.engine.opponentPresent).toBe(false);
+    expect(alice.errors).toEqual([]);
+
+    alice.engine.disconnect();
+  });
+
+  it('is forgotten by a client whose own connection drops', async () => {
+    const { alice, bob } = makeGame('sync-presence-02');
+
+    await alice.engine.connect();
+    await bob.engine.connect();
+    await settle();
+    expect(alice.engine.opponentPresent).toBe(true);
+
+    // Alice hangs up. She forgets locally rather than waiting to be told,
+    // because a closed socket is exactly the state in which no frame can
+    // arrive to correct her — and Bob is told in the ordinary way.
+    alice.engine.disconnect();
+    await settle();
+
+    expect(alice.engine.opponentPresent).toBe(false);
+    expect(bob.engine.opponentPresent).toBe(false);
+
+    bob.engine.disconnect();
+  });
+});
+
 describe('surviving relay eviction', () => {
   it('re-uploads the log and finishes the game', async () => {
     const { gameId, alice, bob } = makeGame('sync-evicted-001');
