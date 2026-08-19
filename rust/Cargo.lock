@@ -838,6 +838,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tabla-core",
+ "tabla-deal",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

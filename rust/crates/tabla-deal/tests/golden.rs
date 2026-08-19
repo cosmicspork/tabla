@@ -12,7 +12,9 @@
 //! under the rules they started with.
 //!
 //! The same vectors are asserted from TypeScript against the wasm build, so the
-//! two languages cannot drift apart either.
+//! two languages cannot drift apart either. The ceremony below uses one entropy
+//! value per entry rather than per proof, because that is what the app does —
+//! one `getRandomValues` call, spent on whatever that entry has to prove.
 
 use tabla_deal::{
     Ciphertext, KeyShare, PublicShare, Transcript, generators, shuffle, state::DealState,
@@ -128,7 +130,7 @@ fn a_whole_opening_ceremony_is_stable() {
     let payload = claimer
         .build(3)
         .key(&[0x02; 32])
-        .shuffle(&[0x03; 32])
+        .shuffle(&[0x02; 32])
         .finish();
     digest.extend_from_slice(&payload);
     initiator.apply(1, 3, &payload).unwrap();
@@ -137,7 +139,7 @@ fn a_whole_opening_ceremony_is_stable() {
     let payload = initiator
         .build(4)
         .shuffle(&[0x04; 32])
-        .deal(2, &[0x05; 32])
+        .deal(2, &[0x04; 32])
         .finish();
     digest.extend_from_slice(&payload);
     initiator.apply(0, 4, &payload).unwrap();
@@ -150,7 +152,7 @@ fn a_whole_opening_ceremony_is_stable() {
 
     assert_eq!(
         hex::encode(sha256(&digest)),
-        "5114418875a4395c8d5857ca4e43bd8ac565738943359bfb4716524532d48123"
+        "c86929198897e17fa7609d88cbe8242d39743159c39fee74e588f01ab0c503a4"
     );
 
     // And the deal it produced, which is what the bytes are for.
@@ -161,7 +163,7 @@ fn a_whole_opening_ceremony_is_stable() {
         .iter()
         .filter_map(|&p| claimer.tile(p))
         .collect();
-    assert_eq!(dealt, vec![2, 6]);
+    assert_eq!(dealt, vec![5, 4]);
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
