@@ -11,7 +11,10 @@ export default defineConfig({
   testDir: '.',
   fullyParallel: false,
   workers: 1,
-  timeout: 60_000,
+  // Generous: a word game test opens two browser profiles from scratch, and
+  // each of them downloads and hash-checks a half-megabyte word list before it
+  // can render a board.
+  timeout: 120_000,
   expect: { timeout: 15_000 },
 
   use: {

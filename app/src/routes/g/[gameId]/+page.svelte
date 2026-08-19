@@ -153,7 +153,7 @@
     the two of you disagreeing about legal moves partway through, which cannot be repaired — so it
     is refused up front.
   </p>
-{:else if board && Board}
+{:else if board?.ready && Board}
   <h1>{titleOf(game?.pluginId ?? '')}</h1>
   <p class="status">{statusLine}</p>
 
@@ -172,6 +172,9 @@
       onsubscribe={(subscription: PushSubscriptionJson) => session?.subscribeToPush(subscription)}
     />
   </div>
+{:else if board && !board.ready}
+  <h1>Setting up…</h1>
+  <p class="muted">Waiting for the opening entries to reach both devices.</p>
 {:else if !failure}
   <h1>Loading…</h1>
 {/if}

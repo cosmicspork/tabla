@@ -195,9 +195,22 @@
   /**
    * Commitments, the toss, forfeits and the final reveal are protocol rather
    * than play. The rules work out what has to be said; the client says it.
+   *
+   * Each of these happens exactly once in a game, so remembering the last one
+   * sent is enough to stop a re-render submitting it twice while the log
+   * catches up. A duplicate would be rejected by the rules anyway, but it would
+   * surface to the player as an error about a move they never made.
    */
+  let lastAuto = $state<string | null>(null);
+
   $effect(() => {
-    if (auto && yourTurn && !busy) void submit(auto);
+    if (!auto || !yourTurn || busy) return;
+
+    const signature = JSON.stringify(auto);
+    if (signature === lastAuto) return;
+
+    lastAuto = signature;
+    void submit(auto);
   });
 
   const canPlay = $derived(yourTurn && phase === 'play' && pending.size > 0 && assigning === null);
@@ -257,7 +270,13 @@
         {#if tile !== '?'}<span class="pip">{valueOf(tile)}</span>{/if}
       </button>
     {/each}
-    <span class="muted opponent">{opponentTiles} on their rack</span>
+    <span class="muted opponent">
+      {#if rack.length < 7 && !yourTurn && phase === 'play'}
+        You draw when they move
+      {:else}
+        {opponentTiles} on their rack
+      {/if}
+    </span>
   </div>
 
   {#if exchanging}
@@ -320,28 +339,42 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Deliberately not `.board`: that selector belongs to tic tac toe's grid. */
+  /* Deliberately not `.board`: that selector belongs to tic tac toe's grid.
+   *
+   * The height comes from the squares rather than from an aspect-ratio on the
+   * grid. Fifteen square rows plus the gaps between them are a little taller
+   * than the board is wide, so pinning the box to a square made the bottom row
+   * overflow and sit on top of whatever came next — including, memorably, the
+   * Play button. */
   .word-board {
     display: grid;
     grid-template-columns: repeat(15, 1fr);
     gap: 1px;
     background: var(--border);
     border: 1px solid var(--border);
-    aspect-ratio: 1;
   }
 
   .word-board.waiting {
     opacity: 0.85;
   }
 
+  /* `min-height: 0` matters more than it looks: a grid item defaults to
+   * `min-height: auto`, which floors the row at whatever the contents need. A
+   * square with a tile in it is then taller than an empty one, the board grows
+   * as the game does, and things below it end up in unpredictable places. With
+   * the floor removed the aspect ratio decides, and the board is the same size
+   * whatever is on it. */
   .square {
     all: unset;
     display: grid;
     place-items: center;
     position: relative;
     aspect-ratio: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
     background: var(--bg);
-    font-size: clamp(0.5rem, 2vw, 0.9rem);
+    font-size: clamp(0.45rem, 1.8vw, 0.85rem);
     cursor: pointer;
     line-height: 1;
   }

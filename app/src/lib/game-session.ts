@@ -18,6 +18,16 @@ import { SyncEngine, type SyncStatus } from './sync/engine.ts';
 import type { CoreModule, Identity, Log, Session } from './wasm/core.ts';
 
 export interface BoardState {
+  /**
+   * Whether the game has actually begun.
+   *
+   * A game starts with two entries — the claimer binding their key, the
+   * initiator writing the configuration — and neither client can render
+   * anything until both are in the log. Tic tac toe would have survived being
+   * asked early, because it ignores its configuration; a game that pins a word
+   * list in it cannot, and should not.
+   */
+  ready: boolean;
   view: Record<string, unknown>;
   outcome: PluginOutcome | null;
   /** Our own player index: 0 for the initiator, 1 for the claimer. */
@@ -195,14 +205,15 @@ export class GameSession {
     const moves = [...replay.moves];
     const encoded = await pluginHost().encodeMove(this.game.pluginId, move);
 
+    const config = replay.config ?? new Uint8Array();
     await pluginHost().validate({
       pluginId: this.game.pluginId,
-      config: replay.config ?? new Uint8Array(),
+      config,
       seed: fromBase64Url(this.game.seed),
       moves,
       move: encoded,
       player: this.player,
-      assetHash: this.game.dictionary,
+      assetHash: assetHashOf(config),
     });
 
     const seq = Number(this.log.tipSeq) + 1;
@@ -230,15 +241,29 @@ export class GameSession {
   // -- rendering ------------------------------------------------------------
 
   async board(): Promise<BoardState> {
+    const waiting = {
+      ready: false as const,
+      view: {},
+      outcome: null,
+      player: this.player,
+      pending: this.engine?.pendingCount ?? 0,
+      status: this.syncStatus,
+    };
+
+    // Sequence 0 is the claimer's join and sequence 1 the initiator's setup.
+    // Until both have arrived there is no configured game to show.
+    if (Number(this.log.tipSeq) < 1) return waiting;
+
     const replay = this.log.replay(this.session);
 
+    const config = replay.config ?? new Uint8Array();
     const { view, outcome } = await pluginHost().view({
       pluginId: this.game.pluginId,
-      config: replay.config ?? new Uint8Array(),
+      config,
       seed: fromBase64Url(this.game.seed),
       moves: [...replay.moves],
       player: this.player,
-      assetHash: this.game.dictionary,
+      assetHash: assetHashOf(config),
     });
 
     // A resignation ends the game even though the rules know nothing about it.
@@ -249,6 +274,7 @@ export class GameSession {
         : { kind: 'winner', player: resignedBy === 0 ? 1 : 0 };
 
     return {
+      ready: true,
       view,
       outcome: finalOutcome,
       player: this.player,
@@ -308,6 +334,21 @@ export class GameSession {
   get gameKeyHash(): string {
     return toBase64Url(this.identity.keyHash());
   }
+}
+
+/**
+ * Which reference data a game needs, read out of its own setup entry.
+ *
+ * Derived from the log rather than kept beside it, for the same reason the draw
+ * seed is: the log is what a backup carries and what both players verified, so
+ * anything derivable from it needs no separate field to lose. The setup entry
+ * is a version byte followed by the hash of the word list both players agreed
+ * to when the invite was made.
+ */
+function assetHashOf(config: Uint8Array): string | undefined {
+  if (config.length !== 33 || config[0] !== 1) return undefined;
+
+  return [...config.slice(1)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export function describeOutcome(outcome: PluginOutcome, player: number): string {
