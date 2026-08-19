@@ -145,6 +145,22 @@ const encodeMove = (cell: number) => plugin.encodeMove('tictactoe', JSON.stringi
 /** Lets queued socket messages be delivered. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+/**
+ * Waits for something to become true, rather than for a fixed interval.
+ *
+ * Everything here is a round trip through a Durable Object, and how long that
+ * takes depends on the machine. A sleep long enough for a laptop is not long
+ * enough for a loaded CI runner, and a sleep long enough for both would make
+ * the suite slow for nobody's benefit.
+ */
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
 describe('two clients playing through the relay', () => {
   it('completes a full game and agrees on the result', async () => {
     const { alice, bob } = makeGame('sync-full-000001');
@@ -197,8 +213,7 @@ describe('two clients playing through the relay', () => {
 
     // Alice arrives later, picks up Bob's join, and plays two entries.
     await alice.engine.connect();
-    await settle();
-    expect(alice.tipSeq).toBe(0);
+    await until(() => alice.tipSeq === 0, "Alice to pick up Bob's join");
 
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
     alice.engine.appendLocal(alice.identity, alice.session.sealMove(2, nonce(2), encodeMove(4)));
@@ -207,9 +222,8 @@ describe('two clients playing through the relay', () => {
 
     // Bob comes back and catches up without either of them being online together.
     await bob.engine.connect();
-    await settle();
+    await until(() => bob.tipSeq === 2, 'Bob to catch up');
 
-    expect(bob.tipSeq).toBe(2);
     expect(bob.moves().map((m) => m[0])).toEqual([4]);
     expect(bob.errors).toEqual([]);
     bob.engine.disconnect();
@@ -233,9 +247,7 @@ describe('two clients playing through the relay', () => {
     // Connecting flushes what the relay is missing. There is no outbox to
     // replay: the log past the relay's tip *is* the queue.
     await alice.engine.connect();
-    await settle();
-
-    expect(alice.engine.pendingCount).toBe(0);
+    await until(() => alice.engine.pendingCount === 0, 'Alice to flush her backlog');
     expect((await roomStub(gameId).state()).tipSeq).toBe(2);
     alice.engine.disconnect();
   });
