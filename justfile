@@ -31,6 +31,19 @@ wasm-plugin:
     cd rust/crates/tabla-plugin-wasm && wasm-pack build --target web \
         --out-dir {{wasm_out}}/plugin --out-name tabla_plugin
 
+# Recompile the word list into the dictionary the word game reads.
+#
+# The output is a committed artifact pinned by hash in shared/src/constants.ts,
+# so this is not part of `build` — running it is a deliberate act. If it changes
+# the file, the golden test fails, which is the point: two players have to be
+# playing against the same list, and games already under way agreed to the old
+# one. A new list ships as a new id, never as an overwrite. See
+# wordlist/PROVENANCE.md.
+dict:
+    cd rust && cargo run -p tabla-dawg --features build --bin build-dict --release -- \
+        {{justfile_directory()}}/wordlist/enable.txt \
+        {{justfile_directory()}}/app/static/dict/en-v1.dawg
+
 # Build the SvelteKit PWA (consumes the WASM output)
 app: wasm
     cd app && bun run build
@@ -61,7 +74,9 @@ dev-full: build
 
 # Rust unit tests
 test-rust:
-    cd rust && cargo test
+    # --all-features so the dictionary builder, which is off by default because
+    # it must never reach the browser, is still covered by its golden tests.
+    cd rust && cargo test --all-features
 
 # TypeScript tests (shared, worker unit + integration, app)
 test-ts: types
@@ -81,7 +96,7 @@ fmt:
     bun run --cwd app format
 
 check:
-    cd rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings
+    cd rust && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings
     cd app && bun run check
 
 # Deploy the Worker and static assets to Cloudflare
