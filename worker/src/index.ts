@@ -59,6 +59,17 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ code: 'method_not_allowed' }, 405);
   }
 
+  const wsMatch = path.match(/^\/ws\/game\/([A-Za-z0-9_-]{22})$/);
+  if (wsMatch) {
+    const gameId = wsMatch[1];
+    // The room is addressed by name, so the same game always reaches the same
+    // instance — which is what makes resume work after its storage was wiped.
+    const stub = roomFor(env, gameId);
+    const url = new URL(request.url);
+    url.searchParams.set('gameId', gameId);
+    return stub.fetch(new Request(url, request));
+  }
+
   if (env.TABLA_TEST_ENDPOINTS === 'true') {
     const wipe = path.match(/^\/api\/_test\/wipe\/([A-Za-z0-9_-]{22})$/);
     if (wipe && request.method === 'POST') {

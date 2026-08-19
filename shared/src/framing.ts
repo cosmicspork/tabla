@@ -59,7 +59,9 @@ export function entryPrevHash(entry: Uint8Array): Uint8Array {
  */
 export async function entryHash(entry: Uint8Array): Promise<Uint8Array> {
   check(entry);
-  const preimage = entry.subarray(0, entry.length - SIG_LEN);
+  // Copied rather than sub-viewed so the buffer is definitely an ArrayBuffer,
+  // which is what `crypto.subtle` accepts.
+  const preimage = new Uint8Array(entry.subarray(0, entry.length - SIG_LEN));
   return new Uint8Array(await crypto.subtle.digest('SHA-256', preimage));
 }
 

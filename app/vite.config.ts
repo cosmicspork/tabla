@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
-import { defineConfig } from 'vite';
+// vitest's defineConfig, so the `test` block below is typed.
+import { defineConfig } from 'vitest/config';
 
 const RELAY = 'http://127.0.0.1:8787';
 

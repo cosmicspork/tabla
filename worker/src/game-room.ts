@@ -15,18 +15,25 @@ import { DurableObject } from 'cloudflare:workers';
 
 import {
   ErrorCode,
-  HASH_LEN,
   MAX_ENTRY_BYTES,
+  PROTOCOL_VERSION,
   RETENTION_MS,
   TURN_REMINDER_MS,
   bytesEqual,
+  clientMessageSchema,
   entryHash,
   entryPrevHash,
   entrySeq,
+  fromBase64Url,
   isGenesisPrevHash,
   toBase64Url,
 } from '@tabla/shared';
-import type { PushSubscriptionJson, Tombstone } from '@tabla/shared';
+import type {
+  ClientMessage,
+  PushSubscriptionJson,
+  ServerMessage,
+  Tombstone,
+} from '@tabla/shared';
 
 import type { Env } from './env.ts';
 
@@ -47,6 +54,17 @@ export interface AppendResult {
 
 /** A type alias, not an interface: `sql.exec<T>` requires an index signature. */
 type MetaRow = { v: string };
+
+/**
+ * Per-connection state, kept in `serializeAttachment` so it survives
+ * hibernation. Capped at 2 KiB by the runtime, hence only what SQLite cannot
+ * give back: which game this socket is for, and who is on the other end.
+ */
+interface SocketAttachment {
+  gameId: string;
+  keyHash: string | null;
+  proto: number;
+}
 
 export class GameRoomDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -241,6 +259,154 @@ export class GameRoomDO extends DurableObject<Env> {
       .toArray()[0];
     return row ? new Uint8Array(row.entry) : null;
   }
+
+  // -- live sessions --------------------------------------------------------
+
+  /**
+   * Accepts a WebSocket using the Hibernation API.
+   *
+   * `acceptWebSocket` rather than `ws.accept()` is what lets an idle game cost
+   * nothing: the object can be evicted from memory while the connection stays
+   * open, and is only revived when a message actually arrives. That matters
+   * here more than in most applications, because a correspondence game is idle
+   * essentially all of the time.
+   */
+  async fetch(request: Request): Promise<Response> {
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+      return new Response('expected a websocket upgrade', { status: 426 });
+    }
+
+    const gameId = new URL(request.url).searchParams.get('gameId');
+    if (!gameId) return new Response('missing gameId', { status: 400 });
+
+    const pair = new WebSocketPair();
+    const server = pair[1];
+
+    this.ctx.acceptWebSocket(server);
+    // Per-connection state has a 2 KiB budget, so it holds only what cannot be
+    // recovered from SQLite when the object wakes up.
+    server.serializeAttachment({ gameId, keyHash: null, proto: PROTOCOL_VERSION });
+
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  private attachmentOf(ws: WebSocket): SocketAttachment {
+    return (ws.deserializeAttachment() ?? {
+      gameId: '',
+      keyHash: null,
+      proto: PROTOCOL_VERSION,
+    }) as SocketAttachment;
+  }
+
+  async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    if (typeof raw !== 'string') return this.fail(ws, ErrorCode.BadMessage, 'expected text');
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return this.fail(ws, ErrorCode.BadMessage, 'not valid JSON');
+    }
+
+    const message = clientMessageSchema.safeParse(parsed);
+    if (!message.success) return this.fail(ws, ErrorCode.BadMessage, message.error.message);
+
+    const attachment = this.attachmentOf(ws);
+    const now = Date.now();
+
+    switch (message.data.t) {
+      case 'hello':
+        return this.onHello(ws, attachment, message.data, now);
+      case 'append':
+        return this.onAppend(ws, attachment, message.data, now);
+      case 'req':
+        return this.onReq(ws, message.data.fromSeq);
+      case 'push_sub':
+        if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
+        await this.setPushSubscription(attachment.keyHash, message.data.subscription, now);
+        return;
+    }
+  }
+
+  private async onHello(
+    ws: WebSocket,
+    attachment: SocketAttachment,
+    hello: Extract<ClientMessage, { t: 'hello' }>,
+    now: number,
+  ): Promise<void> {
+    if (hello.v !== PROTOCOL_VERSION) {
+      return this.fail(ws, ErrorCode.ProtocolVersion, `relay speaks v${PROTOCOL_VERSION}`);
+    }
+
+    ws.serializeAttachment({ ...attachment, keyHash: hello.keyHash });
+    this.touch(hello.keyHash, now);
+
+    // The client compares this against its own tip and decides what to do:
+    // ask for what it is missing, upload what the relay is missing, or, if the
+    // relay holds nothing, re-upload everything after checking the tombstone.
+    const state = await this.state();
+    this.send(ws, {
+      t: 'state',
+      tipSeq: state.tipSeq,
+      tipHash: state.tipHash,
+      tombstone: state.tombstone,
+    });
+  }
+
+  private async onAppend(
+    ws: WebSocket,
+    attachment: SocketAttachment,
+    append: Extract<ClientMessage, { t: 'append' }>,
+    now: number,
+  ): Promise<void> {
+    if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
+
+    const entries = append.entries.map((e) => fromBase64Url(e.entry));
+    const result = await this.append(attachment.gameId, attachment.keyHash, entries, now);
+
+    if (!result.ok) {
+      return this.fail(ws, result.code ?? ErrorCode.BadMessage, result.detail ?? '');
+    }
+
+    this.send(ws, { t: 'appended', tipSeq: result.tipSeq, tipHash: result.tipHash! });
+
+    // Hand the new entries straight to the opponent if they are here, so a live
+    // game does not need a round trip to notice a move.
+    const fanout = append.entries;
+    for (const other of this.ctx.getWebSockets()) {
+      if (other === ws) continue;
+      const theirs = this.attachmentOf(other);
+      if (theirs.keyHash === attachment.keyHash) continue;
+      this.send(other, { t: 'entries', fromSeq: fanout[0]?.seq ?? 0, entries: fanout });
+    }
+
+    await this.notifyOpponent(attachment.keyHash);
+  }
+
+  private async onReq(ws: WebSocket, fromSeq: number): Promise<void> {
+    const entries = await this.entriesFrom(fromSeq);
+    this.send(ws, { t: 'entries', fromSeq, entries });
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+    // 1006 is never a legal close code to send back.
+    ws.close(code === 1006 ? 1000 : code, reason);
+  }
+
+  async webSocketError(): Promise<void> {
+    // Nothing to clean up: all durable state is in SQLite, not in the socket.
+  }
+
+  private send(ws: WebSocket, message: ServerMessage): void {
+    ws.send(JSON.stringify(message));
+  }
+
+  private fail(ws: WebSocket, code: string, detail: string): void {
+    this.send(ws, { t: 'err', code, detail });
+  }
+
+  /** Content-free "your turn" push. Wired up in the push milestone. */
+  protected async notifyOpponent(_authorKeyHash: string): Promise<void> {}
 
   private async reject(code: string, detail: string): Promise<AppendResult> {
     const state = await this.state();
