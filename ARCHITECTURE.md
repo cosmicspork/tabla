@@ -156,6 +156,30 @@ Sorting the two public keys makes the salt identical on both sides regardless of
 who initiated. The invite blob key is **not** derived from anything: it is 32
 random bytes that exist only in the URL fragment.
 
+The Ed25519 to X25519 conversion is the standard one: `to_scalar_bytes()` on the
+signing side pairs with `to_montgomery()` on the verifying side, so both parties
+compute the same point.
+
+### On reusing identity keys for key agreement
+
+Using one keypair for both signing and ECDH is not the textbook recommendation —
+see [eprint 2021/509](https://eprint.iacr.org/2021/509), and dalek's own docs
+advise against it. This protocol does it deliberately.
+
+An invite is a single-use bearer link that has to work when the recipient opens
+it three days later, on a device that has never exchanged a byte with the
+initiator. A proper ephemeral key exchange needs either a live round trip or a
+published pre-key infrastructure; the first breaks the asynchrony the entire
+product is built on, and the second reintroduces the server-side identity we are
+specifically avoiding. The mitigations we do apply: the conversion is the
+library-blessed one, every derived key is domain-separated through HKDF with a
+salt bound to the specific invite and pair, and no key material is ever reused
+across games.
+
+The residual risk is that a single compromised identity key exposes both past
+game contents and the ability to forge entries — but a device compromise already
+yields both, since the seed sits in IndexedDB by necessity (see above).
+
 ## Invitations
 
 The initiator picks game options, seals a config blob, and posts it to the relay.
