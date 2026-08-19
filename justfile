@@ -18,9 +18,9 @@ install:
 # Compile both WASM modules for the browser.
 #
 # Two separate binaries, not one: the core holds the keys, the plugin module
-# holds the game rules and links no cryptography at all. Keeping them apart is
-# what makes "plugins have no key access" a property of the build rather than a
-# rule someone has to remember.
+# holds the game rules and links nothing that could use a key. Keeping them
+# apart is what makes "plugins have no key access" a property of the build
+# rather than a rule someone has to remember.
 wasm: wasm-core wasm-plugin
 
 wasm-core:

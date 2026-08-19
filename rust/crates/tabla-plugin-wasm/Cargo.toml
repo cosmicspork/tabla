@@ -9,10 +9,17 @@ description = "wasm-bindgen surface for bundled game plugins, loaded into a capa
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# No tabla-core, and therefore no cryptography and no key handling compiled in
-# at all. A plugin can compute the consequences of a move and nothing else.
+# No tabla-core, and therefore no key material and no keyed cryptography
+# compiled in at all. A plugin can compute the consequences of a move and
+# nothing else.
+#
+# A game with hidden state does hash — commitments and the draw stream are
+# SHA-256 over public values — which grants access to nothing. The invariant
+# worth protecting is the absence of keys, and a test scans the built artifact
+# to keep it.
 [dependencies]
 tabla-plugin-api.workspace = true
 tabla-tictactoe.workspace = true
+tabla-letras.workspace = true
 wasm-bindgen.workspace = true
 js-sys = "0.3"

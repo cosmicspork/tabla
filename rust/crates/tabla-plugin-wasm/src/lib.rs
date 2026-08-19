@@ -1,10 +1,18 @@
 //! The game-rules WASM module.
 //!
-//! This is a separate binary from `tabla-wasm` on purpose. It links no
-//! cryptography, holds no keys, and has no way to reach storage or the network —
-//! the isolation is a property of what was compiled in, not of a rule someone
-//! has to remember to follow. It is loaded into a Web Worker whose networking
-//! globals are deleted at startup, and it receives only state and move bytes.
+//! This is a separate binary from `tabla-wasm` on purpose. It holds no keys,
+//! links nothing that could use one, and has no way to reach storage or the
+//! network — the isolation is a property of what was compiled in, not of a rule
+//! someone has to remember to follow. It is loaded into a Web Worker whose
+//! networking globals are deleted at startup, and it receives only state, move
+//! and reference bytes.
+//!
+//! A game with hidden state does hash: commitments and the tile draw are
+//! SHA-256 over public values, and the whole point of them is that the opponent
+//! can check the result afterwards. That is not a capability, and the invariant
+//! this module protects is the one that matters — no key material, and nothing
+//! keyed. A test scans the built artifact for the symbols that would say
+//! otherwise.
 //!
 //! Phase 3 makes plugins downloadable with hashes pinned in a signed manifest.
 //! Because that boundary already exists here, the change will be to *how* this
@@ -16,9 +24,11 @@ use wasm_bindgen::prelude::*;
 /// Every plugin bundled into the core app.
 fn lookup(plugin_id: &str) -> Result<&'static dyn BytePlugin, JsError> {
     const TICTACTOE: tabla_tictactoe::Plugin = tabla_tictactoe::Plugin::new();
+    const LETRAS: tabla_letras::Plugin = tabla_letras::Plugin::new();
 
     match plugin_id {
         tabla_tictactoe::TicTacToe::ID => Ok(&TICTACTOE),
+        tabla_letras::Letras::ID => Ok(&LETRAS),
         other => Err(JsError::new(&format!("unknown plugin: {other}"))),
     }
 }
@@ -35,7 +45,10 @@ fn plugin_err(e: PluginError) -> JsError {
 /// Plugin identifiers this module can play.
 #[wasm_bindgen]
 pub fn available_plugins() -> Vec<String> {
-    vec![tabla_tictactoe::TicTacToe::ID.to_string()]
+    vec![
+        tabla_letras::Letras::ID.to_string(),
+        tabla_tictactoe::TicTacToe::ID.to_string(),
+    ]
 }
 
 /// The rules version for a plugin. Clients refuse to start or resume a game

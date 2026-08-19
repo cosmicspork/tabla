@@ -805,6 +805,7 @@ name = "tabla-plugin-wasm"
 version = "0.1.0"
 dependencies = [
  "js-sys",
+ "tabla-letras",
  "tabla-plugin-api",
  "tabla-tictactoe",
  "wasm-bindgen",
