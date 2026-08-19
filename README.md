@@ -8,8 +8,9 @@ The defining property: **the relay is zero-knowledge.** It transports and stores
 ciphertext blobs plus minimal routing metadata. It never sees game state, moves,
 chat, or keys. All cryptography and rule validation happen on the clients.
 
-Tic tac toe ships in the core app. A word game and downloadable plugins come
-later; see [ARCHITECTURE.md](ARCHITECTURE.md) for the protocol and the phase plan.
+Two games ship in the core app: tic tac toe, and **Letras**, a word game.
+Downloadable plugins come later; see [ARCHITECTURE.md](ARCHITECTURE.md) for the
+protocol and the phase plan.
 
 ## Status
 
@@ -18,8 +19,34 @@ hash-chained log, the zero-knowledge relay, live and asynchronous sync, offline
 play, content-free push, and encrypted backup — proven end to end with tic tac
 toe.
 
-Phase 2 (the word game) has not been started. See [ARCHITECTURE.md](ARCHITECTURE.md)
-for the plan and for every protocol decision.
+**Phase 2 is complete**: Letras, played on an original board with a tile set
+derived from a public-domain word list. Hidden state without a trusted third
+party is the interesting part: each player draws from their own committed
+stream, and at the end of the game both open their seeds so every draw can be
+recomputed and checked. The
+[fairness tiers](ARCHITECTURE.md#fairness-tiers) section explains why the design
+differs from the one originally specified, and what it costs.
+
+Phase 3 (downloadable plugins) has not been started.
+
+## Letras
+
+A word game for two, played a turn at a time. The name, the board, the tile
+distribution and the point values are original; the word list is
+[ENABLE](wordlist/PROVENANCE.md), which is public domain.
+
+Two rules are worth knowing before you play:
+
+- **Words are not checked when you play them.** If you think one is not real,
+  challenge it — and lose your turn if it is. This is the tournament rule, and
+  it is what leaves room for bluffing.
+- **You draw after your opponent moves, not when you play.** Otherwise you would
+  see your next tiles before deciding how many to spend. The board tells you
+  when a draw is pending.
+
+You may also notice, over a long game, the same tile appearing twice. That is
+real and it is explained in the architecture notes: it is the price of dealing
+hidden tiles between two devices with nothing trusted in between.
 
 ## Stack
 
@@ -73,10 +100,10 @@ What the suites cover:
 
 | Suite | What it proves |
 |---|---|
-| `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift |
+| `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift. Includes the word game's draw protocol and end-of-game audit, run from both players' points of view over one log |
 | `worker` vitest | the relay's storage, single-use claims, retention and tombstones, and a full two-client game over real WebSockets inside workerd, including eviction and re-upload |
 | `app` vitest | that the TypeScript boundary produces the same bytes as the Rust vectors, and that the relay's framing helpers agree with the core |
-| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, and the iOS install/offline paths |
+| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, and a word game played to a challenge — including restoring one mid-game and finding the rack intact |
 
 ## Verifying push on a real device
 
@@ -93,8 +120,8 @@ cannot be exercised in CI. To check the rest by hand:
 
 ## Deploying
 
-Phase 1 is developed against `wrangler dev` only; the deploy path is configured
-but not exercised.
+Developed against `wrangler dev` only; the deploy path is configured but not
+exercised.
 
 ```bash
 just vapid-keys                     # once, offline
@@ -111,12 +138,23 @@ app/      SvelteKit PWA (SPA)
 rust/     Cargo workspace
   crates/tabla-core         canonical encoding, hash-chained log, crypto
   crates/tabla-plugin-api   the pure-function game plugin interface
-  crates/tabla-tictactoe    the bundled game
+  crates/tabla-dawg         the compact word list format: reader and builder
+  crates/tabla-tictactoe    the game that proves the pipe
+  crates/tabla-letras       the word game: board, draws, challenges, audit
   crates/tabla-wasm         core wasm: identity, log, sessions (holds keys)
-  crates/tabla-plugin-wasm  rules wasm: no crypto linked in (holds none)
+  crates/tabla-plugin-wasm  rules wasm: no keys, nothing keyed
 shared/   wire formats shared by app, worker, and tests
+wordlist/ the word list, vendored, with its provenance
 worker/   relay: Worker + GameRoomDO + PendingInviteDO
 ```
+
+## Changing the word list
+
+Don't edit `wordlist/enable.txt`. A word list is part of the rules: two clients
+running different lists would disagree about a challenged word, mid-game, with
+no way back. A new list ships as a new id with a new pinned hash, and games
+already under way keep playing against the one they started with. See
+[wordlist/PROVENANCE.md](wordlist/PROVENANCE.md).
 
 ## License
 

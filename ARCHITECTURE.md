@@ -160,6 +160,27 @@ The Ed25519 to X25519 conversion is the standard one: `to_scalar_bytes()` on the
 signing side pairs with `to_montgomery()` on the verifying side, so both parties
 compute the same point.
 
+### Per-game draw entropy
+
+A game with hidden state needs a secret that fixes what a player will draw
+before they can see anything that might tempt them to choose. It is **derived,
+not stored**:
+
+```text
+draw_seed = HKDF-SHA256(ikm: identity seed, salt: "tabla/draw-seed/v1", info: game_id)
+```
+
+Deriving rather than storing is what keeps backups working. The export already
+carries the identity seed, so a restored device recomputes the same value and
+rebuilds a half-played rack from the log alone — a browser test checks exactly
+that, restoring a game in progress into a fresh profile and finding the same
+tiles. A separate stored secret would mean a backup that restored the board but
+not your hand.
+
+HKDF rather than the seed itself, because this value is **published** when the
+game ends so the opponent can audit every draw. The reveal has to say nothing
+about the key that signs entries.
+
 ### On reusing identity keys for key agreement
 
 Using one keypair for both signing and ECDH is not the textbook recommendation —
@@ -343,22 +364,43 @@ game exists.
 Every game is a set of **pure functions** over bytes:
 
 ```rust
-fn setup(config: &PluginConfig, seed: u64) -> State;
-fn validate_move(state: &State, mv: &Move, player: PlayerId) -> Result<(), MoveError>;
-fn apply_move(state: &State, mv: &Move) -> State;
-fn player_view(state: &State, player: PlayerId) -> ViewState;
+fn setup(config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<State, PluginError>;
+fn validate_move(state: &State, mv: &Move, player: PlayerId, assets: &[u8]) -> Result<(), PluginError>;
+fn apply_move(state: State, mv: &Move, assets: &[u8]) -> Result<State, PluginError>;
+fn player_view(state: &State, player: PlayerId) -> View;
 fn is_game_over(state: &State) -> Option<Outcome>;
 ```
+
+`assets` is bulk reference data a game needs but does not carry — a word list,
+say. It is passed in because a plugin cannot fetch anything, and it is
+**untrusted**: a game that reads assets verifies them against a hash carried in
+its own configuration, which is itself pinned in the invite both players agreed
+to. Two clients reading different word lists would disagree about whether a
+challenged word is real, which is exactly the desync the determinism rule exists
+to prevent. A game that needs no reference data is handed an empty slice and
+must behave identically whatever it is given; a test asserts that of tic tac
+toe.
+
+Across the sandbox boundary the bytes are sent once and referenced by hash
+afterwards. The position is recomputed from the whole move list on every render,
+so copying half a megabyte per request would be absurd: the worker reports what
+it is missing, the host supplies it, and the request is retried.
 
 The purity is structural, not a convention:
 
 - **Game rules compile to a separate WASM binary from the core.** `tabla-wasm`
   holds identity, key agreement, the log, and session decryption;
   `tabla-plugin-wasm` holds only game rules and does not depend on `tabla-core`
-  at all. The plugin binary therefore contains no cryptographic code — not
-  unused code, *no* code. A test asserts this by scanning the built artifact for
-  crypto symbols, so the split cannot quietly collapse into a single module.
-  (For scale: the core is ~276 KB, the plugin ~96 KB.)
+  at all. The plugin binary therefore holds no key material and links nothing
+  that could use one. A test asserts this by scanning the built artifact for the
+  symbols that would say otherwise, so the split cannot quietly collapse into a
+  single module. (For scale: the core is ~284 KB, the plugin ~203 KB with both
+  games in it.)
+
+  A game with hidden state does hash — commitments and the tile draw are
+  SHA-256 over public values, and the point of them is that the opponent can
+  recheck the result. That is not a capability, and the invariant worth stating
+  precisely is the one the test enforces: no keys, and nothing keyed.
 - plugins run in a dedicated module Web Worker whose global `fetch`,
   `XMLHttpRequest`, and `WebSocket` are deleted at startup,
 - the worker receives only state and move bytes — never a key, never an
@@ -383,19 +425,107 @@ yet needed.
 
 ## Fairness tiers
 
-**Casual, asynchronous (phase 2).** Hidden state such as a tile bag uses
-commit-reveal with a jointly derived seed: both players commit entropy, then
-reveal, and the combined hash seeds a deterministic shuffle. At the end of the
-game the full seed is revealed and either client can replay every draw. Cheating
-is retroactively detectable, which is the right bar among people who know each
-other.
+**Casual, asynchronous (phase 2, built).** Hidden state such as a tile bag uses
+**private draw streams with an end-of-game audit**. This is not the design the
+original specification described, and the difference is worth setting out.
 
-**Competitive, real-time (phase 4).** Full mental poker, threshold ElGamal with
+The specification asked for commit-reveal over a *jointly derived* seed: both
+players contribute entropy, the combined hash seeds one shuffle of a shared bag,
+and the seed is revealed at the end so every draw can be replayed. Those two
+halves cannot both hold. If both players can derive the joint seed then both can
+read the whole bag, including each other's racks, and there is nothing left to
+reveal at the end. If neither can derive it until the end, then neither can
+compute their own draws during the game. Opening part of a shared shuffle
+without opening the rest is precisely mental poker, which needs a live opponent
+for every draw and therefore belongs to the competitive tier below.
+
+What is built instead keeps every property the specification was reaching for.
+Each player has their own secret for the game, derived from their identity key
+(see [Key derivation](#key-derivation)). Player P's *i*th tile is chosen by
+
+```text
+SHA-256(s_P ‖ nonce ‖ i)
+```
+
+where `nonce` is fresh randomness from the **opponent's** most recent log entry.
+P publishes `H(s_P)` before any nonce they will draw against exists, so P cannot
+search for a seed that deals well; the opponent chooses nonces without knowing
+`s_P`, so they cannot steer the draw either. Refills wait for the opponent's
+next entry rather than landing when a play is made, so a player cannot see what
+they are about to draw before deciding how many tiles to spend — and so a play
+that is challenged off the board can have its refill cancelled.
+
+After every draw the player publishes `H(rack ‖ salt)`. At the end of the game
+both reveal their seeds, and every draw either of them made is recomputed from
+scratch and checked against those promises, along with every tile they claimed
+to play. The audit is a pure function of the public log, so both devices reach
+the same verdict, and a player who fails it loses whatever the score said.
+Cheating is made visible rather than impossible, which is the right bar among
+people who know each other.
+
+**The cost, stated plainly.** A player draws from the tiles *they* have not
+seen, which includes whatever is on the opponent's rack. So both players can
+hold the same physical tile at once, and over a game the board can show more
+copies of a letter than the bag contained. Tile counting is softened as a
+result. This is what asynchronous hidden state costs; the collision-free version
+is the competitive tier, and it is not asynchronous.
+
+Two further limits are accepted rather than solved. A player who loses the
+opening toss can simply abandon the game, which is indistinguishable from any
+other abandoned game. And a player who refuses to reveal at the end leaves the
+game unsettled; resigning is the escape hatch, and it skips the audit by
+design.
+
+**Competitive, real-time (phase 4, not built).** Full mental poker, threshold ElGamal with
 a verifiable shuffle. This tier is **synchronous by design**: opening a tile
 requires the opponent's live decryption share. Pre-issuing shares to make it
 asynchronous does not work — with variable-width draws (refill-to-seven), the
 number of shares a player holds leaks lookahead. Competitive means live; casual
 means correspondence. Nothing in phases 1 to 3 may preclude this.
+
+## Letras
+
+The word game that phase 2 exists for. The rules live in `tabla-letras` and are
+summarised here only where they bear on the protocol; the crate documentation
+has the rest.
+
+**Turn structure.** The log alternates strictly, so every turn is an entry:
+passing, exchanging, yielding the opening, and forfeiting a challenged turn are
+all moves. A game opens with two commitments, the initiator opening the toss for
+who plays first, and — if the toss went against the claimer's slot — a yield.
+
+**Challenges.** A play is legal the moment it is geometrically sound. Whether it
+is a word is a question the opponent has to raise, and pays for if they raise it
+wrongly. The window is exactly one entry wide: anything else the opponent does
+waives it, which is why waiving needs no move of its own. A successful challenge
+takes the play back — board, score, tiles, and the refill it had earned — and
+costs the placer their next turn. A failed one costs the challenger theirs.
+
+This is the tournament rule, and it is deliberate. Checking words automatically
+would make a wrong word impossible rather than punishable, which is a different
+game, and it would turn the word list from a referee into a rule.
+
+**Honour mode.** There is none, and there will not be one beyond a label. The
+specification is explicit: no anti-cheat. The audit is not anti-cheat — it is a
+receipt.
+
+**Original content.** The board layout, the tile distribution, the point values,
+and the name are all original, and two of them are original *by construction*:
+the tile set is derived from the word list's own letter frequencies by a
+checked-in script that a test re-runs, and the premium layout is written as one
+eighth of the board and mirrored eight ways. Triple-word squares sit two squares
+in from each corner rather than at the corners, there is no diagonal double-word
+chain out of the centre, and the premium counts are 8/12/16/20 against the
+familiar 8/17/12/24.
+
+**The word list** is ENABLE, public domain, vendored with its provenance in
+`wordlist/PROVENANCE.md` and compiled to a 492 KB graph. TWL/NWL and Collins are
+proprietary and must never appear here. The compiled artifact is committed and
+pinned by hash in two places — a Rust golden test that rebuilds it from the word
+list and compares bytes, and `shared/src/constants.ts`, where the app checks it
+before handing it to the sandbox. It is excluded from the service worker's
+install-time precache and fetched on first use, so a visitor who never plays it
+never downloads it, and a player who has works offline afterwards.
 
 ## Backup and migration
 
@@ -420,6 +550,10 @@ worse than one that names them:
   shell are exercised against an emulated iPhone, which gets the user agent and
   viewport right but is still Chromium. Home Screen installation, seven-day
   cache eviction, and Safari's push implementation need hardware.
+- **Opponent tile possession, during a game.** Nothing checks that the tiles an
+  opponent plays are tiles they actually drew until both seeds are revealed at
+  the end. That is not an oversight; it is what hidden state means. The audit is
+  the check, and it is retrospective by construction.
 - **Tombstone permanence against the operator.** A tombstone protects against a
   relay that lost data or is lying about history. It cannot protect against
   someone with database access deleting the row; that is outside the threat
@@ -428,7 +562,10 @@ worse than one that names them:
 ## Phases
 
 1. **Done:** the full pipe, with tic tac toe.
-2. Word game: SCOWL/ENABLE-derived word list (never TWL/NWL or Collins), original
-   board, tile distribution, and name; commit-reveal bag with end-of-game audit.
-3. Downloadable plugins with signed manifests and pinned hashes.
+2. **Done:** Letras — ENABLE-derived word list (never TWL/NWL or Collins),
+   original board, tile distribution, and name; private draw streams with an
+   end-of-game audit, and tournament-style challenges.
+3. Downloadable plugins with signed manifests and pinned hashes. The asset seam
+   and the hash pinning landed with phase 2, so what remains is fetching a
+   *module* the way a dictionary is already fetched.
 4. Real-time competitive tier.
