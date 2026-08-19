@@ -5,6 +5,7 @@ members = [
     "crates/tabla-plugin-api",
     "crates/tabla-tictactoe",
     "crates/tabla-wasm",
+    "crates/tabla-plugin-wasm",
 ]
 
 [workspace.package]

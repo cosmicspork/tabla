@@ -316,11 +316,26 @@ fn is_game_over(state: &State) -> Option<Outcome>;
 
 The purity is structural, not a convention:
 
+- **Game rules compile to a separate WASM binary from the core.** `tabla-wasm`
+  holds identity, key agreement, the log, and session decryption;
+  `tabla-plugin-wasm` holds only game rules and does not depend on `tabla-core`
+  at all. The plugin binary therefore contains no cryptographic code — not
+  unused code, *no* code. A test asserts this by scanning the built artifact for
+  crypto symbols, so the split cannot quietly collapse into a single module.
+  (For scale: the core is ~280 KB, the plugin ~40 KB.)
 - plugins run in a dedicated module Web Worker whose global `fetch`,
   `XMLHttpRequest`, and `WebSocket` are deleted at startup,
 - the worker receives only state and move bytes — never a key, never an
   IndexedDB handle, never the relay connection,
 - all I/O, crypto, and relay traffic belong to the core app.
+
+Because the boundary already exists, phase 3 changes only *how* a plugin module
+is fetched and verified, not what it is permitted to do.
+
+The plugin also owns move serialization (`encodeMove` / `decodeMove`). The UI
+describes a move in its own terms — `{"cell":4}` — and never hand-rolls the wire
+bytes, because those bytes are signed into the log: an encoding mismatch between
+the UI and the rules would be unrecoverable rather than merely wrong.
 
 `player_view` exists so that a game with hidden state can render without the
 renderer ever holding the parts that player is not entitled to see.

@@ -140,6 +140,18 @@ pub trait BytePlugin {
         seed: &[u8; 32],
         moves: &[Vec<u8>],
     ) -> Result<Vec<u8>, PluginError>;
+
+    /// Turns a move described as JSON into its canonical wire encoding.
+    ///
+    /// The UI describes moves in its own terms (`{"cell":4}`) and the plugin
+    /// owns how they are serialized. Without this the UI would have to hand-roll
+    /// the encoding, which would silently break the moment a game changed its
+    /// move type — and those bytes are signed into the log, so a mismatch is
+    /// unrecoverable rather than merely wrong.
+    fn encode_move(&self, json: &str) -> Result<Vec<u8>, PluginError>;
+
+    /// Renders an encoded move back as JSON, for display and debugging.
+    fn decode_move(&self, bytes: &[u8]) -> Result<String, PluginError>;
 }
 
 /// Bridges a typed [`GamePlugin`] to the byte-level [`BytePlugin`].
@@ -228,5 +240,15 @@ impl<P: GamePlugin> BytePlugin for Adapter<P> {
         }
 
         encode(&state, PluginError::BadState)
+    }
+
+    fn encode_move(&self, json: &str) -> Result<Vec<u8>, PluginError> {
+        let mv: P::Move = serde_json::from_str(json).map_err(|_| PluginError::BadMove)?;
+        encode(&mv, PluginError::BadMove)
+    }
+
+    fn decode_move(&self, bytes: &[u8]) -> Result<String, PluginError> {
+        let mv: P::Move = decode(bytes, PluginError::BadMove)?;
+        serde_json::to_string(&mv).map_err(|_| PluginError::BadMove)
     }
 }

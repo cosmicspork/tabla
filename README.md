@@ -21,6 +21,7 @@ Phase 1 (the full vertical slice with tic tac toe) is under construction.
 |---|---|
 | `app/` | SvelteKit PWA (Svelte 5), built as a pure SPA with `adapter-static` |
 | `rust/` | Game rules, the hash-chained log, and all protocol crypto, compiled to WASM |
+| | — built as *two* modules: the core (keys, log, crypto) and the plugin (rules only) |
 | `worker/` | Cloudflare Worker + two Durable Objects: the relay |
 | `shared/` | Wire formats (zod) shared by the app, the Worker, and the tests |
 
@@ -82,7 +83,8 @@ rust/     Cargo workspace
   crates/tabla-core         canonical encoding, hash-chained log, crypto
   crates/tabla-plugin-api   the pure-function game plugin interface
   crates/tabla-tictactoe    the bundled game
-  crates/tabla-wasm         wasm-bindgen surface consumed by the app
+  crates/tabla-wasm         core wasm: identity, log, sessions (holds keys)
+  crates/tabla-plugin-wasm  rules wasm: no crypto linked in (holds none)
 shared/   wire formats shared by app, worker, and tests
 worker/   relay: Worker + GameRoomDO + PendingInviteDO
 ```

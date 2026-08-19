@@ -15,9 +15,21 @@ _default:
 install:
     bun install
 
-# Compile the Rust core + bundled plugins to WASM for the browser
-wasm:
-    cd rust/crates/tabla-wasm && wasm-pack build --target web --out-dir {{wasm_out}} --out-name tabla
+# Compile both WASM modules for the browser.
+#
+# Two separate binaries, not one: the core holds the keys, the plugin module
+# holds the game rules and links no cryptography at all. Keeping them apart is
+# what makes "plugins have no key access" a property of the build rather than a
+# rule someone has to remember.
+wasm: wasm-core wasm-plugin
+
+wasm-core:
+    cd rust/crates/tabla-wasm && wasm-pack build --target web \
+        --out-dir {{wasm_out}}/core --out-name tabla_core
+
+wasm-plugin:
+    cd rust/crates/tabla-plugin-wasm && wasm-pack build --target web \
+        --out-dir {{wasm_out}}/plugin --out-name tabla_plugin
 
 # Build the SvelteKit PWA (consumes the WASM output)
 app: wasm

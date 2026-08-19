@@ -1,0 +1,18 @@
+[package]
+name = "tabla-plugin-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "wasm-bindgen surface for bundled game plugins, loaded into a capability-free Web Worker"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# No tabla-core, and therefore no cryptography and no key handling compiled in
+# at all. A plugin can compute the consequences of a move and nothing else.
+[dependencies]
+tabla-plugin-api.workspace = true
+tabla-tictactoe.workspace = true
+wasm-bindgen.workspace = true
+js-sys = "0.3"

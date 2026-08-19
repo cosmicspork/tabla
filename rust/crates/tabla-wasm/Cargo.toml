@@ -4,13 +4,20 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "wasm-bindgen surface exposing tabla-core and bundled game plugins to the PWA"
+description = "wasm-bindgen surface exposing tabla-core's identity, log, and session layers to the PWA"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# Deliberately does NOT depend on any game plugin. The core holds the keys; game
+# rules live in a separate module loaded into a worker that has none. See
+# crates/tabla-plugin-wasm.
 [dependencies]
 tabla-core.workspace = true
-tabla-plugin-api.workspace = true
-tabla-tictactoe.workspace = true
 wasm-bindgen.workspace = true
+js-sys = "0.3"
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
