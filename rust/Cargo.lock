@@ -780,6 +780,17 @@ name = "tabla-dawg"
 version = "0.1.0"
 
 [[package]]
+name = "tabla-letras"
+version = "0.1.0"
+dependencies = [
+ "postcard",
+ "serde",
+ "sha2",
+ "tabla-dawg",
+ "tabla-plugin-api",
+]
+
+[[package]]
 name = "tabla-plugin-api"
 version = "0.1.0"
 dependencies = [

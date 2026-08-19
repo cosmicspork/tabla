@@ -1,0 +1,15 @@
+[package]
+name = "tabla-letras"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tabla-plugin-api.workspace = true
+tabla-dawg.workspace = true
+serde.workspace = true
+postcard.workspace = true
+# Hidden state needs commitments and a deterministic draw, which is hashing over
+# public values. No key ever reaches this crate and nothing here is keyed.
+sha2.workspace = true
