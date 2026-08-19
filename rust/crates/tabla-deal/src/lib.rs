@@ -33,6 +33,7 @@ pub mod encoding;
 pub mod error;
 pub mod generators;
 pub mod proofs;
+pub mod shuffle;
 pub mod transcript;
 
 pub use elgamal::{Ciphertext, KeyShare, PublicShare};
