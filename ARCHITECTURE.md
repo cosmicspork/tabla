@@ -358,7 +358,7 @@ The purity is structural, not a convention:
   at all. The plugin binary therefore contains no cryptographic code — not
   unused code, *no* code. A test asserts this by scanning the built artifact for
   crypto symbols, so the split cannot quietly collapse into a single module.
-  (For scale: the core is ~280 KB, the plugin ~40 KB.)
+  (For scale: the core is ~276 KB, the plugin ~96 KB.)
 - plugins run in a dedicated module Web Worker whose global `fetch`,
   `XMLHttpRequest`, and `WebSocket` are deleted at startup,
 - the worker receives only state and move bytes — never a key, never an
