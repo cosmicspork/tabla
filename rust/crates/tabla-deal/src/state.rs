@@ -132,6 +132,18 @@ impl DealState {
         }
     }
 
+    /// Whether publishing our key share now would let us shuffle in the same
+    /// entry.
+    ///
+    /// True for the second player to speak: their key completes the joint key,
+    /// so the shuffle that follows it has something to re-randomise under. It
+    /// saves the ceremony an entry, and an entry is a turn.
+    pub fn ready_for_shuffle_after_key(&self) -> bool {
+        self.public_shares[self.me as usize].is_none()
+            && self.public_shares[1 - self.me as usize].is_some()
+            && !self.shuffled[self.me as usize]
+    }
+
     /// Whether both players have published a key share and shuffled.
     pub fn ready(&self) -> bool {
         self.public_shares.iter().all(Option::is_some) && self.shuffled.iter().all(|&done| done)

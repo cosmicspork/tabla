@@ -83,7 +83,7 @@ impl GamePlugin for TicTacToe {
     /// All three are still part of the signature, because the interface has to
     /// serve games that need them, and a game that ignores them must not be able
     /// to tell that it was handed different ones.
-    fn setup(_config: &[u8], _seed: &[u8; 32], _assets: &[u8]) -> Result<State, PluginError> {
+    fn setup(_config: &[u8], _private: &[u8], _assets: &[u8]) -> Result<State, PluginError> {
         Ok(State {
             board: [None; BOARD_SIZE],
             to_move: tabla_plugin_api::PLAYER_INITIATOR,

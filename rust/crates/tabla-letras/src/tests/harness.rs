@@ -8,9 +8,9 @@
 
 use tabla_plugin_api::{BytePlugin, PLAYER_CLAIMER, PLAYER_INITIATOR, PlayerId, PluginError};
 
-use crate::draw::{Hash, Nonce};
-use crate::game::{Action, Move, State, View, config_for};
-use crate::{Letras as Game, Plugin};
+use crate::v1::draw::{Hash, Nonce};
+use crate::v1::game::{Action, Move, State, View, config_for};
+use crate::v1::{Letras as Game, Plugin};
 use tabla_plugin_api::GamePlugin;
 
 pub const SEED_I: [u8; 32] = [0x11; 32];

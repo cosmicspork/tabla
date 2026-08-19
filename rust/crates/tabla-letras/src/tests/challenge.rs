@@ -15,11 +15,11 @@
 use tabla_plugin_api::{GamePlugin, Outcome, PLAYER_CLAIMER, PLAYER_INITIATOR, PluginError};
 
 use super::harness::*;
-use crate::audit::{Finding, audit};
 use crate::board::{Placement, SIZE};
-use crate::draw::*;
-use crate::game::{Action, Event, Letras, Move, Revealed};
 use crate::tiles::*;
+use crate::v1::audit::{Finding, audit};
+use crate::v1::draw::*;
+use crate::v1::game::{Action, Event, Letras, Move, Revealed};
 
 /// A game whose word list contains whatever the opening rack can spell.
 fn game_where_the_opening_is_a_word() -> (Table, String) {
@@ -345,7 +345,7 @@ fn honest_log(seed: &[u8; 32], player: u8, count: u8) -> (Vec<Event>, Vec<Tile>)
     )
 }
 
-fn verdict_for(events: &[Event], reveals: [Revealed; 2]) -> crate::audit::Verdict {
+fn verdict_for(events: &[Event], reveals: [Revealed; 2]) -> crate::v1::audit::Verdict {
     audit(
         events,
         &reveals,

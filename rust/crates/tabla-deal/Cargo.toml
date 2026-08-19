@@ -15,3 +15,11 @@ zeroize = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
 hex = { workspace = true }
+# The seam test: real proofs under real rules. The arrow points this way on
+# purpose — `tabla-letras` must never reach the curve code, and a reader should
+# be able to see that in the dependency graph rather than trust a feature flag.
+tabla-letras.workspace = true
+tabla-plugin-api.workspace = true
+tabla-dawg = { workspace = true, features = ["build"] }
+sha2 = { workspace = true, features = ["alloc"] }
+postcard.workspace = true
