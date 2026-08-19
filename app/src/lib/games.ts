@@ -13,6 +13,7 @@ import {
 import { getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
+import { requestPersistentStorage } from './lifecycle.ts';
 import { claimInvite, createInvite, inviteStatus } from './relay.ts';
 
 export interface CreatedInvite {
@@ -65,6 +66,10 @@ export async function createGame(origin: string): Promise<CreatedInvite> {
   };
 
   await putGame(game);
+
+  // Now that there is something worth keeping, ask the browser not to evict it.
+  // Losing this database loses the games and the identity key with them.
+  await requestPersistentStorage();
 
   return { game, link: `${origin}/j#${blobId}.${toBase64Url(blobKey)}` };
 }
@@ -141,6 +146,7 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
 
   await putGame(game);
   await rememberContact(game.initiatorPubKey, 'Opponent', now);
+  await requestPersistentStorage();
 
   return { ok: true, game };
 }

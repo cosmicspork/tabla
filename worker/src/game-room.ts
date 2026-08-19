@@ -36,6 +36,8 @@ import type {
 } from '@tabla/shared';
 
 import type { Env } from './env.ts';
+import { sendPush } from './push.ts';
+import type { PushOutcome } from './push.ts';
 
 /** What the relay knows about a game's history. `tipSeq: -1` means nothing. */
 export interface RoomState {
@@ -246,7 +248,8 @@ export class GameRoomDO extends DurableObject<Env> {
 
     if (staged.length > 0) {
       this.touch(keyHash, now);
-      await this.scheduleTurnReminder(now);
+      await this.scheduleTurnReminder(now, keyHash);
+      await this.notifyOpponent(keyHash);
     }
 
     const state = await this.state();
@@ -379,8 +382,6 @@ export class GameRoomDO extends DurableObject<Env> {
       if (theirs.keyHash === attachment.keyHash) continue;
       this.send(other, { t: 'entries', fromSeq: fanout[0]?.seq ?? 0, entries: fanout });
     }
-
-    await this.notifyOpponent(attachment.keyHash);
   }
 
   private async onReq(ws: WebSocket, fromSeq: number): Promise<void> {
@@ -405,8 +406,57 @@ export class GameRoomDO extends DurableObject<Env> {
     this.send(ws, { t: 'err', code, detail });
   }
 
-  /** Content-free "your turn" push. Wired up in the push milestone. */
-  protected async notifyOpponent(_authorKeyHash: string): Promise<void> {}
+  /**
+   * Tells the opponent it is their turn, without telling them anything else.
+   *
+   * Skipped entirely when the opponent already has a live socket: they have the
+   * move already, and a notification would just be noise.
+   */
+  private async notifyOpponent(authorKeyHash: string): Promise<void> {
+    if (this.hasLiveSocket((keyHash) => keyHash !== null && keyHash !== authorKeyHash)) return;
+    await this.pushToOpponents(authorKeyHash);
+  }
+
+  /**
+   * Counts delivery attempts and remembers the last result.
+   *
+   * A push that fails is invisible otherwise — the person simply never hears
+   * about their turn — so it is worth a few bytes to be able to tell.
+   */
+  private recordPushAttempt(outcome: PushOutcome): void {
+    this.setMeta('pushCount', String(Number(this.meta('pushCount') ?? '0') + 1));
+    this.setMeta('lastPushOk', outcome.ok ? '1' : '0');
+  }
+
+  private hasLiveSocket(match: (keyHash: string | null) => boolean): boolean {
+    return this.ctx
+      .getWebSockets()
+      .some((socket) => match(this.attachmentOf(socket).keyHash));
+  }
+
+  /** The single reminder sent when a turn has gone unanswered for a day. */
+  private async onTurnReminder(): Promise<void> {
+    const lastAuthor = this.meta('lastAuthor');
+    if (lastAuthor) await this.pushToOpponents(lastAuthor);
+  }
+
+  private async pushToOpponents(authorKeyHash: string): Promise<void> {
+    const gameId = this.meta('gameId');
+    if (!gameId) return;
+
+    for (const subscription of this.opponentSubscriptions(authorKeyHash)) {
+      const outcome = await sendPush(this.env, subscription, { gameId });
+      this.recordPushAttempt(outcome);
+
+      // A dead endpoint is dropped rather than retried forever.
+      if (outcome.expired) {
+        this.ctx.storage.sql.exec(
+          `UPDATE participant SET push_sub = NULL WHERE push_sub = ?`,
+          JSON.stringify(subscription),
+        );
+      }
+    }
+  }
 
   private async reject(code: string, detail: string): Promise<AppendResult> {
     const state = await this.state();
@@ -439,7 +489,7 @@ export class GameRoomDO extends DurableObject<Env> {
   }
 
   /** Everyone in this game other than `keyHash` who has a push subscription. */
-  protected opponentSubscriptions(keyHash: string): PushSubscriptionJson[] {
+  private opponentSubscriptions(keyHash: string): PushSubscriptionJson[] {
     return this.ctx.storage.sql
       .exec<{ push_sub: string | null }>(
         `SELECT push_sub FROM participant WHERE key_hash != ? AND push_sub IS NOT NULL`,
@@ -449,7 +499,7 @@ export class GameRoomDO extends DurableObject<Env> {
       .map((row) => JSON.parse(row.push_sub!) as PushSubscriptionJson);
   }
 
-  protected participantKeyHashes(): string[] {
+  private participantKeyHashes(): string[] {
     return this.ctx.storage.sql
       .exec<{ key_hash: string }>(`SELECT key_hash FROM participant ORDER BY key_hash`)
       .toArray()
@@ -475,7 +525,8 @@ export class GameRoomDO extends DurableObject<Env> {
     await this.ctx.storage.setAlarm(Math.min(...due));
   }
 
-  private async scheduleTurnReminder(now: number): Promise<void> {
+  private async scheduleTurnReminder(now: number, authorKeyHash?: string): Promise<void> {
+    if (authorKeyHash) this.setMeta('lastAuthor', authorKeyHash);
     this.setMeta('reminderAt', String(now + TURN_REMINDER_MS));
     this.setMeta('retentionAt', String(now + RETENTION_MS));
     this.setMeta('lastActivity', String(now));
@@ -493,15 +544,13 @@ export class GameRoomDO extends DurableObject<Env> {
 
     const reminderAt = this.metaNumber('reminderAt');
     if (reminderAt !== null && now >= reminderAt) {
+      // Consumed before sending, so a reminder is sent once and never nags.
       this.ctx.storage.sql.exec(`DELETE FROM meta WHERE k = 'reminderAt'`);
       await this.onTurnReminder();
     }
 
     await this.rearm();
   }
-
-  /** Overridden by the sync layer, which owns push. */
-  protected async onTurnReminder(): Promise<void> {}
 
   /**
    * Deletes a dormant game's ciphertext, leaving a permanent tombstone.

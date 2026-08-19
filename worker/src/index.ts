@@ -47,6 +47,11 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     return json({ ok: true });
   }
 
+  // Clients need this to subscribe. It is public by design.
+  if (path === '/api/vapid') {
+    return json({ publicKey: env.VAPID_PUBLIC_KEY ?? null });
+  }
+
   if (path === '/api/invite' && request.method === 'POST') {
     return createInvite(request, env);
   }

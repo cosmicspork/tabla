@@ -3,10 +3,14 @@
 
   import Board from '$lib/components/Board.svelte';
   import InviteShare from '$lib/components/InviteShare.svelte';
+  import NotifyPrompt from '$lib/components/NotifyPrompt.svelte';
   import { getGame } from '$lib/db/store.ts';
   import type { GameRecord } from '$lib/db/schema.ts';
   import { GameSession, type BoardState } from '$lib/game-session.ts';
   import { refreshPendingGame } from '$lib/games.ts';
+  import { onShouldResync } from '$lib/lifecycle.ts';
+  import { currentSubscription } from '$lib/push.ts';
+  import type { PushSubscriptionJson } from '@tabla/shared';
 
   const gameId = $derived(decodeURIComponent(page.params.gameId ?? ''));
 
@@ -20,7 +24,15 @@
     const id = gameId;
     void start(id);
 
+    // Sync when the app comes forward, when the network returns, and when a
+    // push wakes us. iOS gives a web app no background execution, so these are
+    // the moments that actually exist.
+    const stopWatching = onShouldResync(() => {
+      void session?.resync();
+    });
+
     return () => {
+      stopWatching();
       if (pollTimer) clearInterval(pollTimer);
       session?.disconnect();
       session = null;
@@ -68,6 +80,11 @@
 
       await opened.connect();
       await opened.writePrologueIfNeeded();
+
+      // If this device already has a subscription, re-register it: room state
+      // is per game, and a game created later would not otherwise know about it.
+      const existing = await currentSubscription();
+      if (existing) opened.subscribeToPush(existing);
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     }
@@ -138,6 +155,11 @@
   {#if !board.outcome}
     <button class="danger" onclick={resign}>Resign</button>
   {/if}
+
+  <div class="notify">
+    <NotifyPrompt onsubscribe={(subscription: PushSubscriptionJson) =>
+      session?.subscribeToPush(subscription)} />
+  </div>
 {:else if !failure}
   <h1>Loading…</h1>
 {/if}
@@ -146,5 +168,9 @@
   .status {
     font-size: 1.05rem;
     margin-bottom: 0;
+  }
+
+  .notify {
+    margin-top: 2rem;
   }
 </style>

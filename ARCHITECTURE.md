@@ -313,7 +313,19 @@ APNs and FCM still relay them, and a notification that says what your opponent
 just played is exactly the leak this project exists to avoid.
 
 The relay sends one push when the opponent appends, and one reminder if a turn
-has gone unanswered for 24 hours. It does not nag beyond that.
+has gone unanswered for 24 hours. It does not nag beyond that: the reminder's
+due time is deleted as it fires, so waking again cannot re-send it. A push is
+skipped entirely when the opponent already has a live socket — they have the
+move already.
+
+The room counts delivery attempts and records the last result, because a push
+that silently fails is otherwise invisible: the person simply never hears about
+their turn.
+
+What automated tests can show is that the relay attempts a push to the right
+participant, that the body encrypts cleanly under RFC 8291, and that the reminder
+fires exactly once. Actual delivery runs through APNs and FCM and cannot be
+exercised in CI, so it stays a manual check on a real device.
 
 iOS constraints shape the UX rather than being worked around:
 

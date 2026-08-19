@@ -62,6 +62,19 @@ just test       # cargo test + vitest (worker, app)
 just check      # fmt check, clippy, svelte-check
 ```
 
+## Verifying push on a real device
+
+Automated tests cover everything up to the push service's door; delivery itself
+cannot be exercised in CI. To check the rest by hand:
+
+1. `just vapid-keys`, set the two secrets, and deploy.
+2. Open the app on an iPhone in Safari and add it to the Home Screen. Push does
+   not work in a tab on iOS, which is why the app walks you through installing.
+3. Open the app from the Home Screen, start a game, and turn on notifications
+   from the button (the prompt has to come from a tap).
+4. Have the other player move. The notification should say only that it is your
+   turn — if it ever names a move, that is a bug worth reporting loudly.
+
 ## Deploying
 
 Phase 1 is developed against `wrangler dev` only; the deploy path is configured

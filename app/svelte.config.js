@@ -13,7 +13,9 @@ export default {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter({ fallback: 'index.html', strict: false }),
-    serviceWorker: { register: false },
+    // Registered automatically. It caches the app shell only; game data lives
+    // in IndexedDB and is never written to a cache.
+    serviceWorker: { register: true },
     alias: { $shared: '../shared/src' },
   },
 };
