@@ -1,0 +1,17 @@
+[package]
+name = "tabla-deal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Group arithmetic and nothing else. This crate must never be reachable from
+# `tabla-plugin-wasm`: the plugin module links no curve code at all, and a test
+# scans the built artifact for exactly these symbols to prove it.
+[dependencies]
+curve25519-dalek = { workspace = true, features = ["alloc", "zeroize", "precomputed-tables"] }
+sha2 = { workspace = true, features = ["alloc"] }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[dev-dependencies]
+hex = { workspace = true }
