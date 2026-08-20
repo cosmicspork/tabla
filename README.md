@@ -153,18 +153,42 @@ cannot be exercised in CI. To check the rest by hand:
 4. Have the other player move. The notification should say only that it is your
    turn — if it ever names a move, that is a bug worth reporting loudly.
 
-## Deploying
+## CI, releases, and deploys
 
-Developed against `wrangler dev` only; the deploy path is configured but not
-exercised.
+Every push and pull request runs three jobs (`.github/workflows/ci.yml`): the
+Rust suite with its formatting, lints and per-game build matrix; the TypeScript
+type-check and unit tests; and the browser suite against the built app served by
+the real Worker. They call the same `just` recipes you would run locally, so CI
+and a working copy cannot drift apart.
+
+CI verifies the plugin manifest's signature and cannot produce one — the
+publisher key lives in `~/.config/tabla/` and never in the repository. That is
+what makes the committed artifacts worth pinning.
+
+Releases use [release-please](https://github.com/googleapis/release-please).
+Merging to `main` opens or updates a release PR built from the conventional-commit
+history; merging *that* cuts the tag, writes `CHANGELOG.md`, and deploys. So a
+deploy is a deliberate act with a diff you can read first, rather than something
+that happens because a commit landed.
+
+### Deploying
+
+The Worker serves the built app as static assets and owns only `/api` and
+`/ws`, so one deploy ships the client and the relay together and they are always
+the same version as each other.
+
+Repository secrets: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. The push
+keys are Worker secrets rather than repository ones, set once out of band:
 
 ```bash
 just vapid-keys                     # once, offline
 cd worker
 bunx wrangler secret put VAPID_PUBLIC_KEY
 bunx wrangler secret put VAPID_PRIVATE_KEY
-cd .. && just deploy
 ```
+
+To deploy by hand, or to redeploy after a failed release without replaying the
+same broken snapshot, run `just deploy` locally or dispatch the release workflow.
 
 ## Layout
 

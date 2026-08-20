@@ -1,0 +1,98 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A second push to a PR makes the first run pointless; let it go.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Formatting, lints, and the per-game build matrix. The matrix matters more
+  # than it looks: each downloadable game is a separate binary built with one
+  # game selected, and a change that only compiles when everything is enabled
+  # would not be caught by `cargo test` alone.
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+      - uses: extractions/setup-just@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: just check-rust
+      # --all-features so the dictionary builder, off by default because it must
+      # never reach the browser, is still covered by its golden tests.
+      - run: just test-rust
+
+  # Type-checks and unit tests for everything JavaScript, plus the WASM the app
+  # is built from. This job is also what proves the committed artifacts are
+  # still the ones the signed manifest names.
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (wasm32)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.13.1
+      - uses: extractions/setup-just@v3
+      - uses: oven-sh/setup-bun@v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: just install
+      # Builds the WASM the type-checker and the tests both read.
+      - run: just build
+      - run: just check-ts
+      - run: just test-ts
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (wasm32)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.13.1
+      - uses: extractions/setup-just@v3
+      - uses: oven-sh/setup-bun@v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: just install
+      - name: Resolve installed Playwright version
+        id: playwright-version
+        working-directory: e2e
+        run: echo "version=$(bunx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.playwright-version.outputs.version }}
+      - name: Install Chromium
+        working-directory: e2e
+        run: bunx playwright install --with-deps chromium
+      # Builds the app and serves it through the real Worker, so the service
+      # worker, the plugin downloads and push all behave as they do in production.
+      - run: just test-e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report
+            test-results
+          retention-days: 7

@@ -1,0 +1,106 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+  # Manual redeploy from current main, for when a deploy failed on a release and
+  # re-running the original would only replay the same broken snapshot.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # Opens and updates a release PR from the conventional-commit history. Merging
+  # that PR cuts the tag and the GitHub release, and sets release_created.
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      version: ${{ steps.rp.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # release-please stamps the new version into the manifests it is told
+      # about, but it cannot touch Cargo.lock — so the release PR would open
+      # with a stale lockfile and fail its own CI. This has to happen here,
+      # in this job: a workflow watching pushes to the release branch would
+      # never fire, because pushes made with GITHUB_TOKEN do not trigger one.
+      - name: Check out the release PR branch
+        if: steps.rp.outputs.prs_created == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ fromJson(steps.rp.outputs.pr).headBranchName }}
+
+      - name: Install Rust
+        if: steps.rp.outputs.prs_created == 'true'
+        run: rustup toolchain install stable --profile minimal
+
+      # Re-resolves only the workspace members whose versions just moved;
+      # third-party dependency versions are left where they are.
+      - name: Refresh Cargo.lock
+        if: steps.rp.outputs.prs_created == 'true'
+        working-directory: rust
+        run: cargo update --workspace
+
+      # Pushed as github-actions[bot] with GITHUB_TOKEN, like release-please's
+      # own commits, so this cannot loop: the push triggers no workflow, and a
+      # re-run finds a clean lockfile and skips the commit entirely.
+      - name: Commit the refreshed lockfile
+        if: steps.rp.outputs.prs_created == 'true'
+        run: |
+          if [ -n "$(git status --porcelain rust/Cargo.lock)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add rust/Cargo.lock
+            git commit -m "chore: refresh Cargo.lock for release"
+            git push origin HEAD:${{ fromJson(steps.rp.outputs.pr).headBranchName }}
+          fi
+
+  # Builds the app and pushes it, with the relay, to Cloudflare. One deploy:
+  # the Worker serves the built app as static assets and owns only /api and /ws,
+  # so the client and the relay are always the same version as each other.
+  #
+  # Runs in the same workflow run as the release, which is what lets it see a
+  # release that release-please just cut — a separate workflow would not, since
+  # GITHUB_TOKEN pushes trigger nothing.
+  deploy:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (wasm32)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: v0.13.1
+      - uses: extractions/setup-just@v3
+      - uses: oven-sh/setup-bun@v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - run: just install
+      # Deliberately not `just deploy`, which would build again: the build is
+      # already done and the committed artifacts must not be regenerated here.
+      # Their hashes are pinned in a signed manifest and the signing key is not
+      # in this repository, so a rebuilt artifact would ship unsignable bytes.
+      - run: just build
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          workingDirectory: worker
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
