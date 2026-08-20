@@ -18,7 +18,8 @@
   "durable_objects": {
     "bindings": [
       { "name": "GAME_ROOMS", "class_name": "GameRoomDO" },
-      { "name": "INVITES", "class_name": "PendingInviteDO" }
+      { "name": "INVITES", "class_name": "PendingInviteDO" },
+      { "name": "MAILBOXES", "class_name": "MailboxDO" }
     ]
   },
 
@@ -28,6 +29,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["GameRoomDO", "PendingInviteDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MailboxDO"]
     }
   ],
 

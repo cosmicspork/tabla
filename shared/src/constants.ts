@@ -54,6 +54,16 @@ export const BLOB_ID_LEN = 16;
 export const MAX_ENTRY_BYTES = 64 * 1024;
 
 /** Invites expire after this long with no claim. */
+/**
+ * How many unread invitations one mailbox will hold.
+ *
+ * A contact could fill yours; nothing stops them, because the whole point is
+ * that they may write to it. The cost is bounded here, and the answer is to
+ * remove the contact — after which this device stops polling that mailbox and
+ * whatever is in it expires unseen.
+ */
+export const MAILBOX_MAX_PENDING = 16;
+
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** A single turn reminder is sent after this much inactivity. */
 export const TURN_REMINDER_MS = 24 * 60 * 60 * 1000;

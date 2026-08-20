@@ -158,3 +158,89 @@ test('a game can be started against someone you have played before', async ({ br
   await one.close();
   await two.close();
 });
+
+test('a second game reaches someone without a link at all', async ({ browser }) => {
+  const one = await browser.newContext();
+  const two = await browser.newContext();
+
+  const a = await one.newPage();
+  const b = await two.newPage();
+
+  await a.goto('/');
+  await introduce(a, 'Ada');
+  await b.goto('/');
+  await introduce(b, 'Pooja');
+
+  // The first game needs a link: there is no other way to reach a stranger.
+  await a.getByRole('link', { name: 'Start a new game' }).click();
+  await a.locator('button[data-game="tictactoe"]').click();
+  await a.getByRole('button', { name: /Make an invite link/ }).click();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  await b.goto(await inviteLink(a));
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  // The second does not. Ada invites Pooja and sends nothing.
+  await a.goto('/new');
+  await a.getByText('Pooja').click();
+  await a.locator('button[data-game="tictactoe"]').click();
+  await a.getByRole('button', { name: 'Invite Pooja' }).click();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+
+  // Pooja finds it waiting the next time she looks, in a mailbox only the two
+  // of them can address.
+  await b.goto('/');
+  await expect(b.getByText('Invitations')).toBeVisible({ timeout: 20_000 });
+  // Scoped to the invitation: she is already playing a tic tac toe with Ada,
+  // which is the whole reason a mailbox between them exists.
+  const invitation = b.locator('[data-invitation]');
+  await expect(invitation).toContainText('Tic tac toe with Ada');
+
+  await invitation.getByRole('button', { name: 'Play' }).click();
+  await expect(b.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  // Taken up, so it is gone from the list rather than offered twice.
+  await b.goto('/');
+  await expect(b.getByText('Invitations')).toBeHidden();
+
+  await one.close();
+  await two.close();
+});
+
+test('an invitation can be turned down without spending it', async ({ browser }) => {
+  const one = await browser.newContext();
+  const two = await browser.newContext();
+
+  const a = await one.newPage();
+  const b = await two.newPage();
+
+  await a.goto('/');
+  await introduce(a, 'Ada');
+  await b.goto('/');
+  await introduce(b, 'Pooja');
+
+  await a.getByRole('link', { name: 'Start a new game' }).click();
+  await a.locator('button[data-game="tictactoe"]').click();
+  await a.getByRole('button', { name: /Make an invite link/ }).click();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  await b.goto(await inviteLink(a));
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  await a.goto('/new');
+  await a.getByText('Pooja').click();
+  await a.locator('button[data-game="letras"]').click();
+  await a.getByRole('button', { name: 'Invite Pooja' }).click();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+
+  await b.goto('/');
+  await expect(b.getByText('Invitations')).toBeVisible({ timeout: 20_000 });
+  await b.getByRole('button', { name: 'No thanks' }).click();
+
+  // Gone from her list, and not claimed: declining is forgetting, not spending
+  // somebody's single-use invite.
+  await expect(b.getByText('Invitations')).toBeHidden();
+  await b.reload();
+  await expect(b.getByText('Invitations')).toBeHidden();
+
+  await one.close();
+  await two.close();
+});

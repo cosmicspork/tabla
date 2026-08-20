@@ -8,7 +8,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 export const DB_NAME = 'tabla';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 
 /** Which side of the invite we were on. Decides who moves first. */
 export type Role = 'initiator' | 'claimer';
@@ -57,6 +57,13 @@ export interface GameRecord {
    * intending to invite one person is no guarantee about who opens it.
    */
   invitedContact?: string;
+  /**
+   * Where this invitation was left, when it was delivered rather than shared.
+   *
+   * Kept so cancelling can take it back out of the recipient's mailbox instead
+   * of leaving an invitation to a game that no longer exists.
+   */
+  mailbox?: { id: string; messageId: string };
   pluginId: string;
   pluginVersion: number;
   role: Role;
@@ -126,6 +133,28 @@ export interface BlobRecord {
   storedAt: number;
 }
 
+/**
+ * An invitation someone left for us, opened and kept.
+ *
+ * Copied out of the mailbox before it is deleted there, so a device that dies
+ * between reading and deleting gets it again rather than losing it. Accepting
+ * one is what claims the invite; declining just forgets it, because claiming is
+ * consuming and a decline should not spend somebody's link.
+ */
+export interface InboxRecord {
+  /** Chosen by the relay, and what makes redelivery idempotent. */
+  messageId: string;
+  mailboxId: string;
+  /** Whose mailbox it came out of — the only thing that says who sent it. */
+  fromPubKey: string;
+  blobId: string;
+  blobKey: string;
+  pluginId: string;
+  pluginVersion: number;
+  createdAt: number;
+  receivedAt: number;
+}
+
 export interface ContactRecord {
   /** base64url Ed25519 public key. The only identifier a peer has. */
   publicKey: string;
@@ -178,6 +207,10 @@ interface TablaDB extends DBSchema {
     key: string;
     value: DealRecord;
   };
+  inbox: {
+    key: string;
+    value: InboxRecord;
+  };
 }
 
 export type TablaDatabase = IDBPDatabase<TablaDB>;
@@ -218,6 +251,10 @@ export function db(): Promise<TablaDatabase> {
 
       if (!database.objectStoreNames.contains('deals')) {
         database.createObjectStore('deals', { keyPath: 'gameId' });
+      }
+
+      if (!database.objectStoreNames.contains('inbox')) {
+        database.createObjectStore('inbox', { keyPath: 'messageId' });
       }
     },
   });

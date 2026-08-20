@@ -9,6 +9,9 @@
 import {
   BLOB_ID_LEN,
   cancelInviteRequestSchema,
+  mailboxPushRequestSchema,
+  pollMailboxRequestSchema,
+  postMailboxRequestSchema,
   ErrorCode,
   claimInviteRequestSchema,
   createInviteRequestSchema,
@@ -19,6 +22,7 @@ import {
 import type { Env } from './env.ts';
 
 export { GameRoomDO } from './game-room.ts';
+export { MailboxDO } from './mailbox.ts';
 export { PendingInviteDO } from './pending-invite.ts';
 
 export default {
@@ -65,6 +69,27 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
       return cancelInvite(request, env, blobId);
     }
     if (!subPath && request.method === 'GET') return inviteStatus(env, blobId);
+    return json({ code: 'method_not_allowed' }, 405);
+  }
+
+  // Before the id-shaped match below, or "poll" would be read as a mailbox id.
+  if (path === '/api/mailbox/poll' && request.method === 'POST') {
+    return pollMailboxes(request, env);
+  }
+
+  const mailboxMatch = path.match(
+    /^\/api\/mailbox\/([A-Za-z0-9_-]{22})(?:\/(push|[A-Za-z0-9_-]{22}))?$/,
+  );
+  if (mailboxMatch) {
+    const [, mailboxId, tail] = mailboxMatch;
+    if (!tail && request.method === 'POST') return postMailbox(request, env, mailboxId);
+    if (tail === 'push' && request.method === 'PUT') {
+      return registerMailboxPush(request, env, mailboxId);
+    }
+    if (tail && tail !== 'push' && request.method === 'DELETE') {
+      await mailboxFor(env, mailboxId).remove(tail);
+      return json({ ok: true });
+    }
     return json({ code: 'method_not_allowed' }, 405);
   }
 
@@ -158,6 +183,70 @@ async function inviteStatus(env: Env, blobId: string): Promise<Response> {
     claimerPubKey: status.claimerPubKey,
     sig: status.sig,
   });
+}
+
+// -- mailboxes --------------------------------------------------------------
+
+/**
+ * Leaves a sealed invitation in a mailbox.
+ *
+ * Unauthenticated, and deliberately so: the mailbox id is a capability derived
+ * from a secret only the two people involved can compute, so anyone able to
+ * name one is already entitled to write to it. See ARCHITECTURE.
+ */
+async function postMailbox(request: Request, env: Env, mailboxId: string): Promise<Response> {
+  const parsed = postMailboxRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const stub = mailboxFor(env, mailboxId);
+  await stub.remember(mailboxId);
+  const result = await stub.post(parsed.data.body, Date.now());
+
+  if (!result.ok) return json({ code: result.code }, 429);
+
+  return json({ messageId: result.messageId, expiresAt: result.expiresAt }, 201);
+}
+
+/**
+ * Reads several mailboxes at once.
+ *
+ * One request rather than one per contact — which tells the relay how many
+ * mailboxes this device holds, and nothing it would not have learned from the
+ * same number of separate requests.
+ */
+async function pollMailboxes(request: Request, env: Env): Promise<Response> {
+  const parsed = pollMailboxRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const now = Date.now();
+  const mailboxes: Record<string, unknown[]> = {};
+
+  await Promise.all(
+    parsed.data.ids.map(async (id) => {
+      mailboxes[id] = await mailboxFor(env, id).list(now);
+    }),
+  );
+
+  return json({ mailboxes });
+}
+
+async function registerMailboxPush(
+  request: Request,
+  env: Env,
+  mailboxId: string,
+): Promise<Response> {
+  const parsed = mailboxPushRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const stub = mailboxFor(env, mailboxId);
+  await stub.remember(mailboxId);
+  await stub.setPush(parsed.data.subscription);
+
+  return json({ ok: true });
+}
+
+function mailboxFor(env: Env, mailboxId: string) {
+  return env.MAILBOXES.get(env.MAILBOXES.idFromName(mailboxId));
 }
 
 // -- helpers ----------------------------------------------------------------

@@ -142,7 +142,19 @@ export type JoinResult =
  * consumed in the act of discovering it is incompatible — an unavoidable
  * consequence of not telling the relay what game is being played.
  */
-export async function joinGame(fragment: string): Promise<JoinResult> {
+export async function joinGame(
+  fragment: string,
+  /**
+   * Who this invitation was expected to be from, when it did not arrive as a
+   * link.
+   *
+   * An invitation found in a pair mailbox could only have been left by the one
+   * person who can write to it — but the blob it points at is a public bearer
+   * token, so checking the key inside it closes the gap between "only they
+   * could have left this" and "this is a game with them".
+   */
+  expectFrom?: string,
+): Promise<JoinResult> {
   const parsed = parseInviteFragment(fragment);
   if (!parsed) return { ok: false, reason: 'malformed' };
 
@@ -165,6 +177,10 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
 
   const invite = core.openInvite(key, fromBase64Url(blob));
   const now = Date.now();
+
+  if (expectFrom && toBase64Url(invite.initiatorPublicKey) !== expectFrom) {
+    return { ok: false, reason: 'malformed' };
+  }
   // The invite names its version, and only that version will do — different
   // rules on the two devices is the one failure there is no recovering from.
   const entry = gameEntry(invite.pluginId, invite.pluginVersion);
@@ -290,6 +306,14 @@ export async function cancelPendingGame(gameId: string): Promise<void> {
   if (!game) return;
   if (game.status === 'active' || game.status === 'finished') {
     throw new Error('That game has already started. Resign it instead.');
+  }
+
+  // Take it back out of the recipient's mailbox first, so an invitation to a
+  // game that no longer exists does not sit there for a week. Best effort: the
+  // link dying is what actually matters, and that is the relay's copy below.
+  if (game.mailbox) {
+    const { retractInvitation } = await import('./mailbox.ts');
+    await retractInvitation(gameId).catch(() => {});
   }
 
   if (game.cancelToken) {

@@ -94,20 +94,27 @@ async function serve(request: Request, url: URL): Promise<Response> {
  * just played would leak exactly what this design protects.
  */
 worker.addEventListener('push', (event) => {
-  let gameId: string | undefined;
+  let payload: { gameId?: string; mailbox?: string } = {};
   try {
-    gameId = event.data?.json()?.gameId;
+    payload = event.data?.json() ?? {};
   } catch {
-    gameId = undefined;
+    payload = {};
   }
 
+  const { gameId, mailbox } = payload;
+
+  // Two things a push can mean, and neither says more than that it happened.
+  // An invitation is not a turn, and calling it one would send someone to a
+  // board that does not exist yet.
+  const invitation = mailbox !== undefined && gameId === undefined;
+
   event.waitUntil(
-    worker.registration.showNotification('Your turn', {
-      body: 'Your opponent has played.',
+    worker.registration.showNotification(invitation ? 'A game for you' : 'Your turn', {
+      body: invitation ? 'Someone you have played wants a game.' : 'Your opponent has played.',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
-      tag: gameId ? `game-${gameId}` : 'tabla',
-      renotify: Boolean(gameId),
+      tag: invitation ? 'tabla-invitations' : gameId ? `game-${gameId}` : 'tabla',
+      renotify: Boolean(gameId ?? mailbox),
       data: { gameId },
     } as NotificationOptions),
   );

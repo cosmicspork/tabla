@@ -38,6 +38,10 @@ export function fakeClaim() {
   return { claimerPubKey: randomBase64Url(32), sig: randomBase64Url(64) };
 }
 
+export function mailboxStub(mailboxId: string) {
+  return env.MAILBOXES.get(env.MAILBOXES.idFromName(mailboxId));
+}
+
 export function roomStub(gameId: string) {
   return env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(gameId));
 }

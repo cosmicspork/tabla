@@ -1,6 +1,13 @@
 /** Reads and writes over the local database. */
 import { db } from './schema.ts';
-import type { BlobRecord, ContactRecord, DealRecord, EntryRecord, GameRecord } from './schema.ts';
+import type {
+  BlobRecord,
+  ContactRecord,
+  DealRecord,
+  EntryRecord,
+  GameRecord,
+  InboxRecord,
+} from './schema.ts';
 
 // -- meta -------------------------------------------------------------------
 
@@ -178,4 +185,20 @@ export async function renameContact(publicKey: string, name: string): Promise<vo
   const database = await db();
   const existing = await database.get('contacts', publicKey);
   if (existing) await database.put('contacts', { ...existing, name });
+}
+
+// -- inbox ------------------------------------------------------------------
+
+/** Keyed by the relay's message id, so a redelivery replaces rather than doubles. */
+export async function putInboxItem(item: InboxRecord): Promise<void> {
+  await (await db()).put('inbox', item);
+}
+
+export async function listInbox(): Promise<InboxRecord[]> {
+  const all = await (await db()).getAll('inbox');
+  return all.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function deleteInboxItem(messageId: string): Promise<void> {
+  await (await db()).delete('inbox', messageId);
 }

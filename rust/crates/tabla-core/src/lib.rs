@@ -16,6 +16,7 @@ pub mod identity;
 pub mod invite;
 pub mod kex;
 pub mod log;
+pub mod mailbox;
 pub mod manifest;
 pub mod seal;
 pub mod session;
