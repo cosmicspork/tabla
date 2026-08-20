@@ -9,6 +9,15 @@ itself with ads and data harvesting.
 **Playable at [tabla.joshbowen.net](https://tabla.joshbowen.net).** Start a
 game, send the link to one person, and play at whatever pace suits you both.
 
+<p align="center">
+  <img src="docs/screenshots/invite.png" width="24%" alt="Invite: one link, good once, with the key in the fragment">
+  <img src="docs/screenshots/letras.png" width="24%" alt="Letras: a word scored on the board, a rack only this device can read">
+  <img src="docs/screenshots/challenge.png" width="24%" alt="Challenge: the opponent decides whether that was a word">
+  <img src="docs/screenshots/games.png" width="24%" alt="Settings: which game modules this device is holding, and how to remove them">
+</p>
+<p align="center"><sub>Real games, dealt by the real protocol — regenerate with
+<code>just screenshots</code>.</sub></p>
+
 The defining property: **the relay is zero-knowledge.** It transports and stores
 ciphertext blobs plus minimal routing metadata. It never sees game state, moves,
 chat, or keys. All cryptography and rule validation happen on the clients.

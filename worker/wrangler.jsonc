@@ -37,6 +37,12 @@
     // Enables the dev-only storage-wipe endpoint used by the acceptance test.
     // Never set this in production.
     "TABLA_TEST_ENDPOINTS": "false",
-    "VAPID_SUBJECT": "mailto:tabla@example.invalid"
+
+    // Who a push service should contact about traffic from this application,
+    // per RFC 8292. It has to be a real, reachable identifier — a placeholder
+    // is the sort of thing that gets a sender quietly deprioritised. An
+    // `https:` URI rather than a `mailto:` so that publishing it costs nobody
+    // an inbox.
+    "VAPID_SUBJECT": "https://tabla.joshbowen.net"
   }
 }

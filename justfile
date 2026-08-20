@@ -130,6 +130,13 @@ test-ts: types
 test-e2e: build
     cd e2e && bunx playwright test
 
+# Recapture the README screenshots from real games.
+#
+# Not part of `test-e2e`: these overwrite committed images, so running them is
+# a deliberate act. Re-run after a UI change so the README does not drift.
+screenshots: build
+    cd e2e && SCREENSHOTS=1 bunx playwright test screenshots.spec.ts
+
 # Everything
 test: test-rust test-ts
 
