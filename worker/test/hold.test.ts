@@ -27,7 +27,20 @@ interface Client {
   received: ServerMessage[];
 }
 
+/** Opens a socket, says hello, and waits for the relay to answer. */
 async function connect(gameId: string, keyHash: string): Promise<Client> {
+  const client = await raw(gameId);
+  client.socket.send(
+    JSON.stringify({ t: 'hello', v: PROTOCOL_VERSION, keyHash, tipSeq: -1, tipHash: null }),
+  );
+
+  await waitFor(() => client.received.some((m) => m.t === 'state'), 'the room state');
+  await drain(client);
+  return client;
+}
+
+/** A socket that has not said who it is. */
+async function raw(gameId: string): Promise<Client> {
   const response = await SELF.fetch(`https://tabla.test/ws/game/${gameId}`, {
     headers: { Upgrade: 'websocket' },
   });
@@ -40,17 +53,41 @@ async function connect(gameId: string, keyHash: string): Promise<Client> {
   socket.addEventListener('message', (event) => {
     client.received.push(JSON.parse(String(event.data)) as ServerMessage);
   });
-
-  socket.send(JSON.stringify({ t: 'hello', v: PROTOCOL_VERSION, keyHash, tipSeq: -1, tipHash: null }));
-  await settle();
   return client;
 }
 
-/** Lets queued socket work run. There is no ordering guarantee to await. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+/** Polls until `ready` holds, rather than sleeping for a guessed interval. */
+async function waitFor(ready: () => boolean, what = 'condition'): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/**
+ * Waits until this socket has received everything already queued for it.
+ *
+ * A `req` for a sequence beyond the end comes back as an empty `entries`, and
+ * delivery on one socket is in order, so anything the relay sent before the
+ * reply has landed by the time the reply does. That is what makes asserting a
+ * message *did not* arrive meaningful, and what a fixed sleep only pretends to
+ * do — it passed here every time and failed on a slower machine.
+ */
+async function drain(client: Client): Promise<void> {
+  const marker = client.received.length;
+  client.socket.send(JSON.stringify({ t: 'req', fromSeq: 1_000_000 }));
+  await waitFor(
+    () => client.received.slice(marker).some((m) => m.t === 'entries' && m.entries.length === 0),
+    'the relay to answer',
+  );
+}
 
 const holds = (client: Client) => client.received.filter((m) => m.t === 'hold');
-const entries = (client: Client) => client.received.filter((m) => m.t === 'entries');
+/** Real fan-out only: the empty replies `drain` provokes are not deliveries. */
+const entries = (client: Client) =>
+  client.received.filter((m) => m.t === 'entries' && m.entries.length > 0);
+const errors = (client: Client) => client.received.filter((m) => m.t === 'err');
 
 function room(label: string) {
   const bytes = gameIdBytes(label);
@@ -67,18 +104,20 @@ describe('a claim on the turn', () => {
     const opponent = await connect(gameId, BOB);
 
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 120_000 }));
-    await settle();
+    await waitFor(() => holds(laptop).length === 1, 'the laptop to hear about the hold');
 
-    expect(holds(laptop)).toHaveLength(1);
     expect(holds(laptop)[0]).toMatchObject({ body: HELD });
-    // Which of someone's devices is thinking is not the opponent's business.
+
+    // Which of someone's devices is thinking is not the opponent's business,
+    // and it is not echoed to the device that took it.
+    await drain(opponent);
+    await drain(phone);
     expect(holds(opponent)).toHaveLength(0);
-    // Nor is it echoed to the device that took it.
     expect(holds(phone)).toHaveLength(0);
 
-    phone.socket.close();
-    laptop.socket.close();
-    opponent.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
+    opponent.socket.close(1000);
   });
 
   it('is opaque to the relay', async () => {
@@ -89,20 +128,20 @@ describe('a claim on the turn', () => {
     const laptop = await connect(gameId, ALICE);
 
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 120_000 }));
-    await settle();
+    await waitFor(() => holds(laptop).length === 1, 'the hold to be forwarded');
 
     const forwarded = holds(laptop)[0];
     expect(forwarded).toMatchObject({ body: HELD });
 
-    phone.socket.close();
-    laptop.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
   });
 
   it('greets a device that opens a game already being played elsewhere', async () => {
     const { gameId } = room('hold-onhello-01');
     const phone = await connect(gameId, ALICE);
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 120_000 }));
-    await settle();
+    await drain(phone);
 
     // The laptop was not connected when the hold was taken. It still needs to
     // know before it draws a board the person cannot use.
@@ -110,21 +149,22 @@ describe('a claim on the turn', () => {
     expect(holds(laptop)).toHaveLength(1);
     expect(holds(laptop)[0]).toMatchObject({ body: HELD });
 
-    phone.socket.close();
-    laptop.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
   });
 
   it('is not offered to a device that opens the game after it lapsed', async () => {
     const { gameId } = room('hold-lapsed-001');
     const phone = await connect(gameId, ALICE);
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 1 }));
-    await settle();
+    await drain(phone);
 
+    // `connect` drains, so anything hello would have sent has arrived.
     const laptop = await connect(gameId, ALICE);
     expect(holds(laptop)).toHaveLength(0);
 
-    phone.socket.close();
-    laptop.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
   });
 
   it('is withdrawn when the device gives it up', async () => {
@@ -133,15 +173,13 @@ describe('a claim on the turn', () => {
     const laptop = await connect(gameId, ALICE);
 
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 120_000 }));
-    await settle();
     phone.socket.send(JSON.stringify({ t: 'release' }));
-    await settle();
+    await waitFor(() => holds(laptop).length === 2, 'the hold and its withdrawal');
 
-    expect(holds(laptop)).toHaveLength(2);
     expect(holds(laptop)[1]).toMatchObject({ body: null });
 
-    phone.socket.close();
-    laptop.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
   });
 
   it('is ended by the move it was claiming', async () => {
@@ -150,7 +188,6 @@ describe('a claim on the turn', () => {
     const laptop = await connect(gameId, ALICE);
 
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 120_000 }));
-    await settle();
 
     const chain = await makeChain(bytes, 1);
     phone.socket.send(
@@ -159,12 +196,12 @@ describe('a claim on the turn', () => {
         entries: [{ seq: 0, entry: toBase64Url(chain[0]) }],
       }),
     );
-    await settle();
+    await waitFor(() => holds(laptop).length === 2, 'the hold to be cleared by the move');
 
     expect(holds(laptop).at(-1)).toMatchObject({ body: null });
 
-    phone.socket.close();
-    laptop.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
   });
 
   it('is refused before the socket has said who it is', async () => {
@@ -181,10 +218,9 @@ describe('a claim on the turn', () => {
     });
 
     socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 120_000 }));
-    await settle();
+    await waitFor(() => seen.some((m) => m.t === 'err'), 'a refusal');
 
-    expect(seen.filter((m) => m.t === 'err')).toHaveLength(1);
-    socket.close();
+    socket.close(1000);
   });
 
   it('refuses to be held for longer than the ceiling', async () => {
@@ -192,10 +228,8 @@ describe('a claim on the turn', () => {
     const phone = await connect(gameId, ALICE);
 
     phone.socket.send(JSON.stringify({ t: 'hold', body: HELD, ttlMs: 24 * 60 * 60 * 1000 }));
-    await settle();
-
-    expect(phone.received.filter((m) => m.t === 'err')).toHaveLength(1);
-    phone.socket.close();
+    await waitFor(() => errors(phone).length === 1, 'a refusal');
+    phone.socket.close(1000);
   });
 });
 
@@ -212,17 +246,19 @@ describe('a move', () => {
     phone.socket.send(
       JSON.stringify({ t: 'append', entries: [{ seq: 0, entry: toBase64Url(chain[0]) }] }),
     );
-    await settle();
+    await waitFor(
+      () => entries(laptop).length === 1 && entries(opponent).length === 1,
+      'both other sockets to receive the move',
+    );
 
-    expect(entries(laptop)).toHaveLength(1);
-    expect(entries(opponent)).toHaveLength(1);
     // The device that wrote it already has it, and gets an ack instead.
+    await drain(phone);
     expect(entries(phone)).toHaveLength(0);
     expect(phone.received.filter((m) => m.t === 'appended')).toHaveLength(1);
 
-    phone.socket.close();
-    laptop.socket.close();
-    opponent.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
+    opponent.socket.close(1000);
   });
 
   it('does not make one person look like company to themselves', async () => {
@@ -232,10 +268,11 @@ describe('a move', () => {
     const phone = await connect(gameId, ALICE);
     const laptop = await connect(gameId, ALICE);
 
+    await drain(phone);
     const latest = phone.received.filter((m) => m.t === 'presence').at(-1);
     expect(latest).toMatchObject({ others: 0 });
 
-    phone.socket.close();
-    laptop.socket.close();
+    phone.socket.close(1000);
+    laptop.socket.close(1000);
   });
 });
