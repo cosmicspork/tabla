@@ -114,20 +114,6 @@ test('letras: a word on the board, tiles only you can read', async ({ browser })
   await two.close();
 });
 
-test('challenge: the opponent decides whether that was a word', async ({ browser }) => {
-  // The rule the game is built around — a play is legal the moment it is
-  // geometrically sound, and whether it is *English* is the opponent's to
-  // raise and to pay for.
-  const { one, two, mover, other, indices } = await gameWhereMoverCanSpell(browser, false);
-
-  await playWord(mover, indices);
-  await expect(other.getByRole('button', { name: 'Challenge' })).toBeVisible({ timeout: 30_000 });
-
-  await other.screenshot({ path: `${OUT}/challenge.png` });
-  await one.close();
-  await two.close();
-});
-
 test('games on this device: what was downloaded, and how to be rid of it', async ({ browser }) => {
   // The plugin story: rules arrive on first play, checked against a signature,
   // and go away again on request.

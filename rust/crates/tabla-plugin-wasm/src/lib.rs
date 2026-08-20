@@ -57,6 +57,14 @@ fn lookup(plugin_id: &str) -> Result<&'static dyn BytePlugin, JsError> {
         }
     }
 
+    #[cfg(feature = "letras-v3")]
+    {
+        const LETRAS: tabla_letras::v3::Plugin = tabla_letras::v3::Plugin::new();
+        if plugin_id == tabla_letras::v3::Letras::ID {
+            return Ok(&LETRAS);
+        }
+    }
+
     Err(JsError::new(&format!("unknown plugin: {plugin_id}")))
 }
 
@@ -72,6 +80,8 @@ pub fn available_plugins() -> Vec<String> {
         tabla_letras::v1::Letras::ID,
         #[cfg(feature = "letras-v2")]
         tabla_letras::v2::Letras::ID,
+        #[cfg(feature = "letras-v3")]
+        tabla_letras::v3::Letras::ID,
         #[cfg(feature = "tictactoe")]
         tabla_tictactoe::TicTacToe::ID,
     ]
@@ -101,6 +111,11 @@ pub fn deck(plugin_id: &str) -> Result<Vec<u8>, JsError> {
     // terms it has no use for.
     #[cfg(feature = "letras-v2")]
     if plugin_id == tabla_letras::v2::Letras::ID {
+        return Ok(tabla_letras::tiles::deck());
+    }
+
+    #[cfg(feature = "letras-v3")]
+    if plugin_id == tabla_letras::v3::Letras::ID {
         return Ok(tabla_letras::tiles::deck());
     }
 

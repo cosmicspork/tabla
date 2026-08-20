@@ -7,7 +7,7 @@
     onresign,
   }: {
     board: BoardState;
-    onplay: (move: unknown) => void;
+    onplay: (move: unknown) => void | Promise<boolean | void>;
     onresign?: () => void;
   } = $props();
 
@@ -157,12 +157,17 @@
    *
    * That bookkeeping lives there rather than here because it differs by
    * version, and a board that had to know would need rewriting for each.
+   *
+   * The board is only cleared if the move was taken. Now that words are checked
+   * as they are played, a refusal is something a player meets in normal play,
+   * and sweeping their tiles back to the rack would make them lay the whole word
+   * out again to change one letter.
    */
   async function submit(action: unknown) {
     if (busy) return;
     busy = true;
     try {
-      await onplay(action);
+      if ((await onplay(action)) === false) return;
       recall();
       exchanging = false;
       discards = new Set();
@@ -327,10 +332,12 @@
     </p>
   {/if}
 
-  <p class="muted honour">
-    Words are not checked when they are played. If you think one is not real, challenge it — and
-    lose your turn if it is.
-  </p>
+  {#if canChallenge}
+    <p class="muted honour">
+      This game began under the old rules, where words are not checked as they are played. If you
+      think one is not real, challenge it — and lose your turn if it is.
+    </p>
+  {/if}
 
   {#if audit}
     <div class="card">

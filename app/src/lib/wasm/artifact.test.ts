@@ -1,7 +1,7 @@
 /**
  * The downloadable plugin module, tested as the bytes players receive.
  *
- * `app/static/plugins/letras-v2.wasm` is a committed artifact whose hash is
+ * `app/static/plugins/letras-v3.wasm` is a committed artifact whose hash is
  * pinned in the signed manifest, so it is not rebuilt as part of `just build`.
  * That makes going stale the failure worth guarding against: source can move on
  * while the committed bytes stay behind, and nothing else in the suite would
@@ -18,13 +18,13 @@ import { describe, expect, it } from 'vitest';
 import { DICTIONARY_EN_V1 } from '@tabla/shared';
 
 import {
-  loadLetras2FromDisk,
+  loadLetras3FromDisk,
   loadLetrasFromDisk,
-  readLetras2Wasm,
+  readLetras3Wasm,
   readLetrasWasm,
 } from './node.ts';
 
-const letras = await loadLetras2FromDisk();
+const letras = await loadLetras3FromDisk();
 
 const dictionary = new Uint8Array(
   await readFile(fileURLToPath(new URL('../../../static/dict/en-v1.dawg', import.meta.url))),
@@ -35,7 +35,7 @@ function fromHex(hex: string): Uint8Array {
 }
 
 /** What the initiator writes into the log's setup entry: version, then hash. */
-const CONFIG = new Uint8Array([2, ...fromHex(DICTIONARY_EN_V1.sha256)]);
+const CONFIG = new Uint8Array([3, ...fromHex(DICTIONARY_EN_V1.sha256)]);
 
 /**
  * What the host tells the rules privately: which player, and no tiles yet.
@@ -48,7 +48,7 @@ const PRIVATE = new Uint8Array([0, 0]);
 describe('the downloadable letras module', () => {
   it('carries only the game it was built for', () => {
     expect(letras.available_plugins()).toEqual(['letras']);
-    expect(letras.plugin_version('letras')).toBe(2);
+    expect(letras.plugin_version('letras')).toBe(3);
 
     // Tic tac toe is bundled with the app, so this module has no reason to
     // carry it — and the feature gating means it genuinely does not.
@@ -63,7 +63,7 @@ describe('the downloadable letras module', () => {
     // `curve25519` is the one that matters most now: the deal that hides the
     // tiles is built on it, and it lives on the other side of this boundary.
     const text = new TextDecoder('utf-8', { fatal: false })
-      .decode(await readLetras2Wasm())
+      .decode(await readLetras3Wasm())
       .toLowerCase();
 
     for (const symbol of ['chacha', 'ed25519', 'curve25519', 'argon', 'hkdf']) {
@@ -78,7 +78,7 @@ describe('the downloadable letras module', () => {
     // relative to the worker bundle — and Vite would emit a second copy of it
     // into the app, which is the thing downloading it is meant to avoid.
     const glue = await readFile(
-      fileURLToPath(new URL('./letras2-pkg/tabla_letras2.js', import.meta.url)),
+      fileURLToPath(new URL('./letras3-pkg/tabla_letras3.js', import.meta.url)),
       'utf8',
     );
 

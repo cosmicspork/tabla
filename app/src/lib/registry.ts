@@ -19,7 +19,8 @@ import type { BoardState } from './game-session.ts';
 /** Every board takes the same props; what a move *is* varies by game. */
 export type BoardProps = {
   board: BoardState;
-  onplay: (move: unknown) => void;
+  /** Returns `false` if the rules refused the move, so a board can react. */
+  onplay: (move: unknown) => void | Promise<boolean | void>;
   /**
    * Give up.
    *
@@ -88,6 +89,18 @@ const REGISTRY: GameEntry[] = [
   },
   {
     id: 'letras',
+    version: 3,
+    title: 'Letras',
+    blurb: 'Words on a board, a turn at a time. Downloads once, then plays offline.',
+    seed: 'deal',
+    distribution: 'downloadable',
+    resignInBoard: true,
+    dictionary: DICTIONARY_EN_V1.sha256,
+    board: () => import('./components/WordBoard.svelte'),
+  },
+  {
+    // Kept for games begun under the challenge rule, which finish under it.
+    id: 'letras',
     version: 2,
     title: 'Letras',
     blurb: 'Words on a board, a turn at a time. Downloads once, then plays offline.',
@@ -98,7 +111,7 @@ const REGISTRY: GameEntry[] = [
     board: () => import('./components/WordBoard.svelte'),
   },
   {
-    // Kept so games started under the old rules can be finished, and invites
+    // Kept so games started under the oldest rules can be finished, and invites
     // written by an older build can still be joined. Not offered for new games
     // — see `availableGames`.
     id: 'letras',

@@ -2,6 +2,8 @@
 # in the signed manifest, and the loader is patched by that recipe — reformatting
 # either would mean the committed artifact no longer matches what produced it.
 src/lib/wasm/letras-pkg/
+src/lib/wasm/letras2-pkg/
+src/lib/wasm/letras3-pkg/
 
 build/
 .svelte-kit/

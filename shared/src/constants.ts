@@ -29,7 +29,7 @@ export const MANIFEST_SIGNING_PUBKEY =
  *
  * The hash is written into every Letras invite, so both players prove they hold
  * the same dictionary before a game starts — a client with a different list
- * would disagree about whether a challenged word is real, and there is no
+ * would disagree about whether a played word is real, and there is no
  * recovering from that once a game is under way.
  *
  * Pinned in `rust/crates/tabla-dawg/tests/golden_dictionary.rs` too, where a

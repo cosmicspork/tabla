@@ -12,6 +12,7 @@
  */
 import { loadLetras } from '../wasm/letras.ts';
 import { loadLetras2 } from '../wasm/letras2.ts';
+import { loadLetras3 } from '../wasm/letras3.ts';
 import { loadPlugin, type PluginModule } from '../wasm/plugin.ts';
 import {
   ASSET_MISSING,
@@ -56,6 +57,7 @@ const ready = loadPlugin();
 const loaders: Record<string, (bytes: Uint8Array) => Promise<PluginModule>> = {
   'letras@1': loadLetras,
   'letras@2': loadLetras2,
+  'letras@3': loadLetras3,
 };
 
 /** Modules already initialized here, bundled or provided. */

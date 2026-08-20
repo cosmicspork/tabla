@@ -753,16 +753,27 @@ all moves. A game opens with the deal's ceremony — key shares, two shuffles, a
 the opening racks — which also carries the toss for who plays first, and then a
 yield if it went against whoever holds the next slot.
 
-**Challenges.** A play is legal the moment it is geometrically sound. Whether it
-is a word is a question the opponent has to raise, and pays for if they raise it
-wrongly. The window is exactly one entry wide: anything else the opponent does
-waives it, which is why waiving needs no move of its own. A successful challenge
-takes the play back — board, score, tiles, and the refill it had earned — and
-costs the placer their next turn. A failed one costs the challenger theirs.
+**Words, from version 3.** A play has to be geometrically sound *and* has to
+make words. The check runs in `validate_move`, so an illegal word never reaches
+the log: the mover's device refuses it before sealing an entry, and the
+opponent's runs the same check while replaying. Both hold the identical list —
+pinned by hash in the invite, verified against those bytes before the rules see
+them — so they cannot reach different answers, which is the property that makes
+checking safe here at all. The refusal names the offending word, because a play
+can make several and only one may be the problem.
 
-This is the tournament rule, and it is deliberate. Checking words automatically
-would make a wrong word impossible rather than punishable, which is a different
-game, and it would turn the word list from a referee into a rule.
+**Challenges, in versions 1 and 2.** A play was legal the moment it was
+geometrically sound; whether it was a word was a question the opponent had to
+raise and pay for if they raised it wrongly, in a window exactly one entry wide.
+
+That is the tournament rule, and it earns its keep across a physical board where
+the alternative is one player leafing through a dictionary while the other
+waits. It earned nothing here: both devices could already answer the question
+instantly and identically, so leaving it unanswered until someone objected meant
+a game could be won with letters nobody claims are words, against an opponent
+who was not paying attention. The deal made playing a tile you were not dealt
+impossible rather than punishable; version 3 does the same for words. Games
+begun under the older rules finish under them.
 
 **Honour mode.** There is none, and there will not be one beyond a label. The
 specification is explicit: no anti-cheat, and none of this is anti-cheat: the
