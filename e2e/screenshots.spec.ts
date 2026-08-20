@@ -24,6 +24,51 @@ test.use({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
 
 const OUT = '../docs/screenshots';
 
+test('home: the games waiting on you, and the ones that are not', async ({ browser }) => {
+  // A list with something in every state worth showing: a game to move in, one
+  // waiting on the other player, and an invite nobody has taken.
+  const alice = await browser.newContext();
+  const bob = await browser.newContext();
+
+  const a = await alice.newPage();
+  const b = await bob.newPage();
+
+  // A word game, played far enough that the list has something to say about it.
+  await a.goto('/');
+  await startGame(a, 'letras');
+  await expect(a.locator('[data-invite-link]')).toBeVisible();
+  const letras = await inviteLink(a);
+  await b.goto(letras);
+  await expect(a.locator('[data-rack]')).toHaveAttribute('data-rack', /^.{7}$/, {
+    timeout: 30_000,
+  });
+
+  // A second game, played far enough that it is Alice's move again — the group
+  // this list exists to put first.
+  await a.goto('/');
+  await startGame(a, 'tictactoe');
+  await expect(a.locator('[data-invite-link]')).toBeVisible();
+  const ttt = await inviteLink(a);
+  await b.goto(ttt);
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 30_000 });
+  await a.locator('.board button').first().click();
+  await expect(b.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
+  await b.locator('.board button').nth(4).click();
+  await expect(a.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
+
+  // And an invite still out.
+  await a.goto('/');
+  await startGame(a, 'tictactoe');
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+
+  await a.goto('/');
+  await expect(a.getByText('Invites out')).toBeVisible();
+
+  await a.screenshot({ path: `${OUT}/home.png` });
+  await alice.close();
+  await bob.close();
+});
+
 test('invite: the whole of starting a game', async ({ browser }) => {
   // One link to one person. There are no accounts to make and nobody to find.
   const context = await browser.newContext();

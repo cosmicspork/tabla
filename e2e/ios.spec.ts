@@ -115,7 +115,8 @@ test('the app still opens with no network at all', async ({ browser }) => {
   await context.setOffline(true);
   await page.reload();
 
-  await expect(page.getByRole('heading', { name: 'Your games' })).toBeVisible();
+  // The shell is there and interactive, served entirely by the service worker.
+  await expect(page.getByRole('button', { name: 'Start a new game' })).toBeVisible();
 
   await context.setOffline(false);
   await context.close();

@@ -156,8 +156,11 @@ test('resigning is reported as resigning, to both players', async ({ browser }) 
   await expect(a.getByTestId('status')).toContainText('You resigned.');
   await expect(b.getByTestId('status')).toContainText('They resigned.', { timeout: 20_000 });
 
-  // And the game list agrees with the board.
+  // And the game list agrees with the board — under Finished, which is folded
+  // away until asked for.
   await a.goto('/');
+  await expect(a.getByText('You resigned')).toBeHidden();
+  await a.getByRole('button', { name: /Finished/ }).click();
   await expect(a.getByText('You resigned')).toBeVisible();
 
   await alice.close();
@@ -176,8 +179,8 @@ test('an invite nobody took can be called off, and the link dies with it', async
   await a.getByRole('button', { name: 'Cancel invite' }).click();
 
   // Back on the list, with nothing left behind.
-  await expect(a.getByRole('heading', { name: 'Your games' })).toBeVisible();
-  await expect(a.getByText('Waiting for someone to join')).toBeHidden();
+  await expect(a.getByRole('button', { name: 'Start a new game' })).toBeVisible();
+  await expect(a.getByText('Invites out')).toBeHidden();
 
   // And the link is dead for whoever still has it — a local delete alone would
   // have left a live invite out there, redeemable into a game with nobody on
@@ -185,6 +188,50 @@ test('an invite nobody took can be called off, and the link dies with it', async
   const b = await newPlayer(bob);
   await b.goto(link);
   await expect(b.getByTestId('status')).toContainText('Could not join');
+
+  await alice.close();
+  await bob.close();
+});
+
+test('the list sorts by who has to act next', async ({ browser }) => {
+  const alice = await browser.newContext();
+  const bob = await browser.newContext();
+
+  const a = await newPlayer(alice);
+  const b = await newPlayer(bob);
+
+  await startGame(a);
+  const link = await readInviteLink(a);
+  await b.goto(link);
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  // Alice moves first, so before she does the game is hers to act on and Bob
+  // is the one waiting.
+  await expect(a.getByText('Your turn.')).toBeVisible();
+  await a.goto('/');
+  await expect(a.getByText('Your move')).toBeVisible();
+  await b.goto('/');
+  await expect(b.getByText('Waiting on them')).toBeVisible();
+
+  // Alice moves, and her own list flips as soon as she comes back to it.
+  //
+  // Waiting for the board to say so first is not politeness: the record the
+  // list reads is written during the same render, just before it, so leaving
+  // for the list too early races the write on a slow machine.
+  await a.goBack();
+  await a.locator('.board button').first().click();
+  await expect(a.getByText('Waiting for your opponent.')).toBeVisible();
+  await a.goto('/');
+  await expect(a.getByText('Waiting on them')).toBeVisible();
+  await expect(a.getByText('Your move')).toBeHidden();
+
+  // Bob's list is drawn from what his device knows, and his device learns of
+  // the move by syncing the game — which happens when he opens it, or when a
+  // push wakes him. Opening it is enough for both.
+  await b.getByRole('link', { name: /Tic tac toe/ }).click();
+  await expect(b.getByText('Your turn.')).toBeVisible({ timeout: 20_000 });
+  await b.goto('/');
+  await expect(b.getByText('Your move')).toBeVisible();
 
   await alice.close();
   await bob.close();
