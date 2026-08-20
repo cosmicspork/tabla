@@ -188,7 +188,10 @@ bunx wrangler secret put VAPID_PRIVATE_KEY
 ```
 
 To deploy by hand, or to redeploy after a failed release without replaying the
-same broken snapshot, run `just deploy` locally or dispatch the release workflow.
+same broken snapshot, run `just deploy` locally, or dispatch the release
+workflow with its **deploy** input ticked. A plain dispatch only nudges
+release-please — asking for a release PR and forcing a release out want very
+different amounts of care, so they are different actions.
 
 ## Layout
 
