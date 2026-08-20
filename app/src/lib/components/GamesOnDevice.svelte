@@ -21,6 +21,22 @@
 
   const keyOf = (entry: { id: string; version: number }) => `${entry.id}@${entry.version}`;
 
+  /** The newest version of each game, so older ones can be marked as such. */
+  const current = games.reduce((newest, entry) => {
+    newest.set(entry.id, Math.max(newest.get(entry.id) ?? 0, entry.version));
+    return newest;
+  }, new Map<string, number>());
+
+  /**
+   * Two versions of one game are two downloads under one name, which is
+   * unreadable without saying which is which. Only the superseded ones are
+   * labelled: the current version is just the game.
+   */
+  const supersededBy = (entry: { id: string; version: number }) =>
+    (current.get(entry.id) ?? entry.version) > entry.version
+      ? `version ${entry.version}`
+      : null;
+
   let states = $state<Record<string, InstalledState>>({});
   let busy = $state<string | null>(null);
   let failure = $state<string | null>(null);
@@ -80,10 +96,17 @@
       {@const state = states[keyOf(entry)]}
       <li data-plugin={entry.id} data-version={entry.version}>
         <div>
-          <span>{entry.title}</span>
+          <span>
+            {entry.title}
+            {#if supersededBy(entry)}
+              <span class="muted older">{supersededBy(entry)}</span>
+            {/if}
+          </span>
           <span class="muted size" data-size={state?.storedBytes ?? 0}>
             {#if state?.installed}
               {megabytes(state.storedBytes)} on this device
+            {:else if state && supersededBy(entry)}
+              only for games that started under it
             {:else if state}
               not downloaded — {megabytes(state.totalBytes)}
             {:else}
@@ -96,7 +119,7 @@
           <button disabled={busy === keyOf(entry)} onclick={() => act(entry, removePlugin)}>
             Remove
           </button>
-        {:else if state}
+        {:else if state && !supersededBy(entry)}
           <button disabled={busy === keyOf(entry)} onclick={() => act(entry, installPlugin)}>
             {busy === keyOf(entry) ? 'Downloading…' : 'Download'}
           </button>
@@ -128,5 +151,9 @@
 
   .size {
     font-size: 0.85rem;
+  }
+
+  .older {
+    font-size: 0.8rem;
   }
 </style>
