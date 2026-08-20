@@ -8,6 +8,7 @@
  */
 import {
   BLOB_ID_LEN,
+  cancelInviteRequestSchema,
   ErrorCode,
   claimInviteRequestSchema,
   createInviteRequestSchema,
@@ -56,11 +57,14 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     return createInvite(request, env);
   }
 
-  const inviteMatch = path.match(/^\/api\/invite\/([A-Za-z0-9_-]{22})(\/claim)?$/);
+  const inviteMatch = path.match(/^\/api\/invite\/([A-Za-z0-9_-]{22})(\/claim|\/cancel)?$/);
   if (inviteMatch) {
-    const [, blobId, claimPath] = inviteMatch;
-    if (claimPath && request.method === 'POST') return claimInvite(request, env, blobId);
-    if (request.method === 'GET') return inviteStatus(env, blobId);
+    const [, blobId, subPath] = inviteMatch;
+    if (subPath === '/claim' && request.method === 'POST') return claimInvite(request, env, blobId);
+    if (subPath === '/cancel' && request.method === 'POST') {
+      return cancelInvite(request, env, blobId);
+    }
+    if (!subPath && request.method === 'GET') return inviteStatus(env, blobId);
     return json({ code: 'method_not_allowed' }, 405);
   }
 
@@ -94,12 +98,15 @@ async function createInvite(request: Request, env: Env): Promise<Response> {
 
   // The relay picks the blob id so a client cannot squat on or overwrite one.
   const blobId = toBase64Url(crypto.getRandomValues(new Uint8Array(BLOB_ID_LEN)));
+  // Minted here rather than in the DO, beside the id it goes with, and returned
+  // exactly once: `status` never repeats it, so only the caller ever holds it.
+  const cancelToken = toBase64Url(crypto.getRandomValues(new Uint8Array(BLOB_ID_LEN)));
   const blob = fromBase64Url(parsed.data.blob);
 
   const stub = env.INVITES.get(env.INVITES.idFromName(blobId));
-  const { expiresAt } = await stub.create(blobId, toArrayBuffer(blob), Date.now());
+  const { expiresAt } = await stub.create(blobId, toArrayBuffer(blob), cancelToken, Date.now());
 
-  return json({ blobId, expiresAt }, 201);
+  return json({ blobId, expiresAt, cancelToken }, 201);
 }
 
 async function claimInvite(request: Request, env: Env, blobId: string): Promise<Response> {
@@ -116,6 +123,28 @@ async function claimInvite(request: Request, env: Env, blobId: string): Promise<
   }
 
   return json({ blob: result.blob });
+}
+
+/**
+ * Withdraws an invite nobody took.
+ *
+ * Authorised by the token handed back at creation and nothing else — the relay
+ * has never seen the initiator's key, so there is nothing else it could check.
+ */
+async function cancelInvite(request: Request, env: Env, blobId: string): Promise<Response> {
+  const parsed = cancelInviteRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const stub = env.INVITES.get(env.INVITES.idFromName(blobId));
+  const result = await stub.cancel(parsed.data.cancelToken);
+
+  if (!result.ok) {
+    const status =
+      result.code === ErrorCode.AlreadyClaimed ? 409 : result.code === ErrorCode.Forbidden ? 403 : 404;
+    return json({ code: result.code }, status);
+  }
+
+  return json({ ok: true });
 }
 
 async function inviteStatus(env: Env, blobId: string): Promise<Response> {

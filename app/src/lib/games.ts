@@ -14,7 +14,7 @@ import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { requestPersistentStorage } from './lifecycle.ts';
 import { gameEntry, latestGame } from './registry.ts';
-import { claimInvite, createInvite, inviteStatus, RelayError } from './relay.ts';
+import { cancelInvite, claimInvite, createInvite, inviteStatus, RelayError } from './relay.ts';
 
 export interface CreatedInvite {
   game: GameRecord;
@@ -69,13 +69,14 @@ export async function createGame(
     BigInt(now),
   );
 
-  const { blobId, expiresAt } = await createInvite(toBase64Url(blob));
+  const { blobId, expiresAt, cancelToken } = await createInvite(toBase64Url(blob));
 
   const game: GameRecord = {
     gameId: toBase64Url(gameId),
     blobId,
     blobKey: toBase64Url(blobKey),
     expiresAt,
+    cancelToken,
     pluginId: entry.id,
     pluginVersion: entry.version,
     dictionary: entry.dictionary,
@@ -233,6 +234,7 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
     claimerPubKey: status.claimerPubKey,
     status: 'active',
     blobKey: undefined,
+    cancelToken: undefined,
     lastActivity: now,
   });
 }
@@ -240,17 +242,31 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
 /**
  * Calls off an invite nobody took.
  *
- * Only the local half for now: the record and its log go, so the game stops
- * occupying the list. The blob stays on the relay until its seven-day alarm
- * fires — the relay has never seen the initiator's key, so it has no way to
- * tell a cancellation from anyone else asking, and the endpoint that fixes
- * that comes with the cancel token.
+ * The relay is told first, so the link stops working for whoever has it — a
+ * local delete alone would leave a live invite out there, and someone redeeming
+ * it later would land in a game the other side had already forgotten.
+ *
+ * A relay that has already dropped the blob, or never had it, is not a failure:
+ * the link is dead either way, which is what was being asked for.
  */
 export async function cancelPendingGame(gameId: string): Promise<void> {
   const game = await getGame(gameId);
   if (!game) return;
   if (game.status === 'active' || game.status === 'finished') {
     throw new Error('That game has already started. Resign it instead.');
+  }
+
+  if (game.cancelToken) {
+    try {
+      await cancelInvite(game.blobId, game.cancelToken);
+    } catch (error) {
+      // Already claimed is the one refusal worth passing on: the game exists,
+      // and the person on the other end is waiting for a move.
+      if (error instanceof RelayError && error.status === 409) {
+        throw new Error('Someone has just joined this game. Open it to play or resign.');
+      }
+      if (!(error instanceof RelayError) || error.status !== 404) throw error;
+    }
   }
 
   await deleteGame(gameId);

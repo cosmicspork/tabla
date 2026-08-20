@@ -30,6 +30,19 @@ export const createInviteRequestSchema = z.object({
 export const createInviteResponseSchema = z.object({
   blobId: blobIdSchema,
   expiresAt: z.number().int(),
+  /**
+   * Proof that this caller is the one who made the invite.
+   *
+   * The relay never sees the initiator's identity key — it is sealed inside the
+   * blob — so it has no way to recognise them later. A bearer token handed back
+   * at creation is the smallest thing that lets an invite be withdrawn without
+   * the relay learning who anybody is.
+   */
+  cancelToken: b64url.length(22),
+});
+
+export const cancelInviteRequestSchema = z.object({
+  cancelToken: b64url.length(22),
 });
 
 export const claimInviteRequestSchema = z.object({
@@ -112,6 +125,7 @@ export const ErrorCode = {
   AlreadyClaimed: 'already_claimed',
   Expired: 'expired',
   NotFound: 'not_found',
+  Forbidden: 'forbidden',
 } as const;
 
 // ---------------------------------------------------------------------------

@@ -8,7 +8,10 @@ import { call, fakeClaim, inviteStub, postJson, randomBase64Url } from './helper
 async function createInvite(blob = randomBase64Url(120)) {
   const response = await postJson('/api/invite', { blob });
   expect(response.status).toBe(201);
-  return { blob, ...(await response.json<{ blobId: string; expiresAt: number }>()) };
+  return {
+    blob,
+    ...(await response.json<{ blobId: string; expiresAt: number; cancelToken: string }>()),
+  };
 }
 
 describe('creating an invite', () => {
@@ -31,6 +34,57 @@ describe('creating an invite', () => {
     const b = await createInvite();
 
     expect(a.blobId).not.toBe(b.blobId);
+  });
+});
+
+describe('cancelling an invite', () => {
+  it('withdraws it, so the link stops working', async () => {
+    const { blobId, cancelToken } = await createInvite();
+
+    const cancelled = await postJson(`/api/invite/${blobId}/cancel`, { cancelToken });
+    expect(cancelled.status).toBe(200);
+
+    // Gone for the initiator polling it, and gone for anyone holding the link.
+    expect((await call(`/api/invite/${blobId}`)).status).toBe(404);
+    expect((await postJson(`/api/invite/${blobId}/claim`, fakeClaim())).status).toBe(404);
+  });
+
+  it('clears the expiry alarm it no longer needs', async () => {
+    const { blobId, cancelToken } = await createInvite();
+    await postJson(`/api/invite/${blobId}/cancel`, { cancelToken });
+
+    // Nothing left to expire: the alarm was deleted with the row.
+    expect(await runDurableObjectAlarm(inviteStub(blobId))).toBe(false);
+  });
+
+  it('refuses the wrong token, and does not destroy the invite trying', async () => {
+    const { blobId } = await createInvite();
+
+    const refused = await postJson(`/api/invite/${blobId}/cancel`, {
+      cancelToken: randomBase64Url(16),
+    });
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toMatchObject({ code: 'forbidden' });
+
+    // Still there, still claimable.
+    expect((await call(`/api/invite/${blobId}`)).status).toBe(200);
+  });
+
+  it('refuses to cancel a claimed invite', async () => {
+    const { blobId, cancelToken } = await createInvite();
+    await postJson(`/api/invite/${blobId}/claim`, fakeClaim());
+
+    // By now it is a game with two players in it. Resigning ends that, not this.
+    const refused = await postJson(`/api/invite/${blobId}/cancel`, { cancelToken });
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ code: 'already_claimed' });
+  });
+
+  it('never hands the token back out', async () => {
+    const { blobId } = await createInvite();
+
+    const status = await (await call(`/api/invite/${blobId}`)).json();
+    expect(status).not.toHaveProperty('cancelToken');
   });
 });
 

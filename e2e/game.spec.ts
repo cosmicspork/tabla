@@ -164,12 +164,13 @@ test('resigning is reported as resigning, to both players', async ({ browser }) 
   await bob.close();
 });
 
-test('an invite nobody took can be called off', async ({ browser }) => {
+test('an invite nobody took can be called off, and the link dies with it', async ({ browser }) => {
   const alice = await browser.newContext();
-  const a = await newPlayer(alice);
+  const bob = await browser.newContext();
 
+  const a = await newPlayer(alice);
   await startGame(a);
-  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  const link = await readInviteLink(a);
 
   a.on('dialog', (dialog) => dialog.accept());
   await a.getByRole('button', { name: 'Cancel invite' }).click();
@@ -178,5 +179,13 @@ test('an invite nobody took can be called off', async ({ browser }) => {
   await expect(a.getByRole('heading', { name: 'Your games' })).toBeVisible();
   await expect(a.getByText('Waiting for someone to join')).toBeHidden();
 
+  // And the link is dead for whoever still has it — a local delete alone would
+  // have left a live invite out there, redeemable into a game with nobody on
+  // the other end.
+  const b = await newPlayer(bob);
+  await b.goto(link);
+  await expect(b.getByTestId('status')).toContainText('Could not join');
+
   await alice.close();
+  await bob.close();
 });

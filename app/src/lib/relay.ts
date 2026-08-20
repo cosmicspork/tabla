@@ -33,8 +33,20 @@ async function unwrap(response: Response): Promise<unknown> {
 }
 
 /** Uploads a sealed invite. The relay assigns the id, so it cannot be squatted. */
-export async function createInvite(blob: string): Promise<{ blobId: string; expiresAt: number }> {
+export async function createInvite(
+  blob: string,
+): Promise<{ blobId: string; expiresAt: number; cancelToken: string }> {
   return createInviteResponseSchema.parse(await unwrap(await post('/api/invite', { blob })));
+}
+
+/**
+ * Withdraws an invite nobody has redeemed.
+ *
+ * Refused once it has been claimed: at that point there is a game, and a game
+ * ends by being resigned rather than by having its invite taken away.
+ */
+export async function cancelInvite(blobId: string, cancelToken: string): Promise<void> {
+  await unwrap(await post(`/api/invite/${blobId}/cancel`, { cancelToken }));
 }
 
 /**

@@ -33,26 +33,34 @@ export class PendingInviteDO extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => {
       ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS invite (
-          blob_id     TEXT PRIMARY KEY,
-          blob        BLOB NOT NULL,
-          claimed_by  TEXT,
-          claim_sig   TEXT,
-          created_at  INTEGER NOT NULL,
-          expires_at  INTEGER NOT NULL
+          blob_id      TEXT PRIMARY KEY,
+          blob         BLOB NOT NULL,
+          claimed_by   TEXT,
+          claim_sig    TEXT,
+          cancel_token TEXT NOT NULL,
+          created_at   INTEGER NOT NULL,
+          expires_at   INTEGER NOT NULL
         )
       `);
     });
   }
 
   /** Stores a sealed invite and schedules its expiry. */
-  async create(blobId: string, blob: ArrayBuffer, now: number): Promise<{ expiresAt: number }> {
+  async create(
+    blobId: string,
+    blob: ArrayBuffer,
+    cancelToken: string,
+    now: number,
+  ): Promise<{ expiresAt: number }> {
     const expiresAt = now + INVITE_TTL_MS;
 
     this.ctx.storage.sql.exec(
-      `INSERT INTO invite (blob_id, blob, created_at, expires_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO invite (blob_id, blob, cancel_token, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(blob_id) DO NOTHING`,
       blobId,
       blob,
+      cancelToken,
       now,
       expiresAt,
     );
@@ -94,6 +102,33 @@ export class PendingInviteDO extends DurableObject<Env> {
     return { ok: true, blob: toBase64Url(new Uint8Array(row.blob)) };
   }
 
+  /**
+   * Withdraws an unclaimed invite.
+   *
+   * A claimed one is refused rather than deleted: by then it is a game with two
+   * players in it, and taking the blob away would not un-start it — resigning
+   * is what ends a game. The token is compared in constant time, because the
+   * only thing standing between a stranger and cancelling someone's invite is
+   * not being able to guess it.
+   */
+  async cancel(cancelToken: string): Promise<{ ok: boolean; code?: string }> {
+    const row = this.ctx.storage.sql
+      .exec<{ cancel_token: string; claimed_by: string | null }>(
+        `SELECT cancel_token, claimed_by FROM invite LIMIT 1`,
+      )
+      .toArray()[0];
+
+    if (!row) return { ok: false, code: ErrorCode.NotFound };
+    if (row.claimed_by !== null) return { ok: false, code: ErrorCode.AlreadyClaimed };
+    if (!constantTimeEqual(row.cancel_token, cancelToken)) {
+      return { ok: false, code: ErrorCode.Forbidden };
+    }
+
+    this.ctx.storage.sql.exec(`DELETE FROM invite`);
+    await this.ctx.storage.deleteAlarm();
+    return { ok: true };
+  }
+
   /** What the initiator polls to learn who redeemed its link. */
   async status(): Promise<InviteStatus> {
     const row = this.ctx.storage.sql
@@ -117,4 +152,18 @@ export class PendingInviteDO extends DurableObject<Env> {
   async alarm(): Promise<void> {
     this.ctx.storage.sql.exec(`DELETE FROM invite`);
   }
+}
+
+/**
+ * Compares two tokens without leaking where they first differ.
+ *
+ * Both are base64url of the same length by schema, so comparing bytes is safe
+ * and the length check is a formality rather than an early exit worth hiding.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+
+  let difference = 0;
+  for (let i = 0; i < a.length; i += 1) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return difference === 0;
 }

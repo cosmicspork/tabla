@@ -253,6 +253,27 @@ not trusted to authenticate anyone.
 
 Invites expire after 7 days via a DO alarm.
 
+### Withdrawing one
+
+An invite can also be taken back before anyone redeems it. The problem is that
+the relay has never seen the initiator's identity key — it is sealed inside the
+blob — so there is nothing it could check a request against. Rather than start
+storing the key, which would be exactly the metadata the relay is built not to
+hold, `POST /api/invite` returns a second random 16-byte value:
+
+```
+{ blobId, expiresAt, cancelToken }
+```
+
+`POST /api/invite/<blobId>/cancel` with that token deletes the blob and its
+alarm. The token is returned once, at creation, and `status` never repeats it,
+so holding it is the same thing as having made the invite. It is compared in
+constant time.
+
+A claimed invite is refused with a 409 rather than deleted. By then it is a game
+with two players in it, and deleting the blob would not un-start it — resigning
+is what ends a game.
+
 ## Sync
 
 Game rooms are addressed `GAME_ROOMS.idFromName(gameId)`, so the same game always

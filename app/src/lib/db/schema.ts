@@ -42,6 +42,14 @@ export interface GameRecord {
    * that has gone can be told apart from one nobody has opened yet.
    */
   expiresAt?: number;
+  /**
+   * Bearer token that authorises withdrawing this invite.
+   *
+   * Kept for as long as the invite is unclaimed, and dropped with the blob key
+   * the moment it is spent — it authorises nothing after that, so keeping it
+   * would be storing a secret for no reason.
+   */
+  cancelToken?: string;
   pluginId: string;
   pluginVersion: number;
   role: Role;

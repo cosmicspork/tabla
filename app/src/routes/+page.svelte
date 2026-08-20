@@ -47,7 +47,7 @@
   }
 
   async function cancel(game: GameRecord) {
-    if (!confirm('Call off this invite? The link will stop working for you either way.')) return;
+    if (!confirm('Call off this invite? The link will stop working for whoever has it.')) return;
     failure = null;
     try {
       await cancelPendingGame(game.gameId);
