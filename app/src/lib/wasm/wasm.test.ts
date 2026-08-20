@@ -340,6 +340,98 @@ describe('log', () => {
     expect(log.suffix(3).length).toBe(2);
     expect(log.suffix(5).length).toBe(0);
   });
+
+  it('takes back a move the relay never accepted, and carries on', () => {
+    // What happens when this person's other device got its move in first: the
+    // entry we wrote is not history, it is a draft, and the log has to be able
+    // to put it back before applying the one that won.
+    const { alice, bob, session, log } = playGame([4, 0]);
+    const acked = log.tipSeq;
+    const ackedHash = hex(log.tipHash!);
+
+    log.appendSigned(alice, session.sealMove(4, nonce(4), encodeMove(8)));
+    expect(log.tipSeq).toBe(4n);
+
+    log.truncate(Number(acked) + 1);
+    expect(log.tipSeq).toBe(acked);
+    expect(hex(log.tipHash!)).toBe(ackedHash);
+
+    // The other device's move chains onto the restored tip, which is the whole
+    // point: a rolled-back log is a log that can still be caught up.
+    const theirs = new core.Log(GAME_ID, alice.publicKey(), bob.publicKey());
+    for (const entry of log.suffix(0)) theirs.append(entry);
+    const winner = theirs.appendSigned(alice, session.sealMove(4, nonce(9), encodeMove(2)));
+
+    log.append(winner);
+    expect(log.replay(session).moveCount).toBe(3);
+  });
+
+  it('truncating past the start empties the log rather than underflowing', () => {
+    const { log } = playGame([4]);
+
+    log.truncate(0);
+    expect(log.length).toBe(0);
+    expect(log.tipSeq).toBe(-1n);
+  });
+});
+
+describe('devices', () => {
+  const PHONE = new Uint8Array(16).fill(1);
+  const LAPTOP = new Uint8Array(16).fill(2);
+
+  it('gives each device of one person its own mailbox', () => {
+    const alice = new core.Identity(ALICE_SEED);
+
+    expect(hex(alice.deviceMailbox(PHONE))).not.toBe(hex(alice.deviceMailbox(LAPTOP)));
+    // Nobody else can address either of them: the id derives from the seed.
+    expect(hex(new core.Identity(BOB_SEED).deviceMailbox(PHONE))).not.toBe(
+      hex(alice.deviceMailbox(PHONE)),
+    );
+  });
+
+  it('carries a notice from one device to another', () => {
+    const alice = new core.Identity(ALICE_SEED);
+    const body = { NameChanged: 'Josh' };
+
+    const sealed = alice.sealDeviceNotice(
+      LAPTOP,
+      PHONE,
+      nonce(3),
+      1_780_000_000n,
+      JSON.stringify(body),
+    );
+    const opened = JSON.parse(alice.openDeviceNotice(LAPTOP, sealed));
+
+    expect(opened.v).toBe(1);
+    expect(opened.from).toEqual([...PHONE]);
+    expect(opened.sent_at).toBe(1_780_000_000);
+    expect(opened.body).toEqual(body);
+  });
+
+  it('will not open a notice addressed to a different device', () => {
+    const alice = new core.Identity(ALICE_SEED);
+    const sealed = alice.sealDeviceNotice(
+      LAPTOP,
+      PHONE,
+      nonce(3),
+      1n,
+      JSON.stringify({ DeviceRemoved: { id: [...LAPTOP] } }),
+    );
+
+    expect(() => alice.openDeviceNotice(PHONE, sealed)).toThrow(/decryption/);
+  });
+
+  it('seals a hold the opponent cannot mistake for a move', () => {
+    const { session, log } = playGame([4, 0]);
+    const before = log.tipSeq;
+
+    const held = session.sealHold(nonce(5), LAPTOP);
+    expect([...session.openHold(held)]).toEqual([...LAPTOP]);
+
+    // It is not an entry and never becomes one.
+    expect(() => log.append(held)).toThrow();
+    expect(log.tipSeq).toBe(before);
+  });
 });
 
 describe('tombstones', () => {

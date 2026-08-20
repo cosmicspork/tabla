@@ -23,42 +23,87 @@ export const BACKUP_EXTENSION = '.tabla';
  * The bundle format this build writes. Mirrors `EXPORT_VERSION` in
  * `tabla-core::export`, which is what refuses a file it does not understand.
  */
-const EXPORT_VERSION = 2;
+const EXPORT_VERSION = 3;
+
+/** Mirrors the Rust `GameExport`. Optional fields are `null`, never absent. */
+export interface GameJson {
+  game_id: number[];
+  plugin_id: string;
+  plugin_version: number;
+  initiator_pub_key: number[];
+  claimer_pub_key: number[] | null;
+  blob_id: number[];
+  seed: number[];
+  entries: number[][];
+  status: string;
+  created_at: number;
+  last_activity: number;
+  blob_key: number[] | null;
+  cancel_token: string | null;
+  expires_at: number | null;
+  dictionary: number[] | null;
+  invited_contact: number[] | null;
+  mailbox: { id: string; message_id: string } | null;
+  opponent_name: string | null;
+  your_turn: boolean | null;
+  last_play: string | null;
+  outcome: string | null;
+}
 
 /** Mirrors the Rust `ExportBundle`, which is what the WASM layer expects. */
-interface BundleJson {
+export interface BundleJson {
   v: number;
   identity_seed: number[];
   contacts: { public_key: number[]; name: string; first_seen: number }[];
-  games: {
-    game_id: number[];
-    plugin_id: string;
-    plugin_version: number;
-    initiator_pub_key: number[];
-    claimer_pub_key: number[];
-    blob_id: number[];
-    seed: number[];
-    entries: number[][];
-  }[];
+  games: GameJson[];
   exported_at: number;
   /** What this player asks to be called. Restored with the identity it names. */
   name: string;
+  /** Empty until there is somewhere to keep them; see `lib/devices.ts`. */
+  devices: { id: number[]; name: string; linked_at: number }[];
 }
 
 const bytes = (base64url: string) => [...fromBase64Url(base64url)];
+const maybeBytes = (base64url?: string) => (base64url ? bytes(base64url) : null);
+const hexBytes = (hex?: string) =>
+  hex ? [...(hex.match(/../g) ?? [])].map((pair) => parseInt(pair, 16)) : null;
+
+/** One game, in the shape the bundle wants. */
+export async function gameToJson(game: GameRecord): Promise<GameJson> {
+  return {
+    game_id: bytes(game.gameId),
+    plugin_id: game.pluginId,
+    plugin_version: game.pluginVersion,
+    initiator_pub_key: bytes(game.initiatorPubKey),
+    claimer_pub_key: maybeBytes(game.claimerPubKey),
+    blob_id: bytes(game.blobId),
+    seed: bytes(game.seed),
+    entries: (await loadEntries(game.gameId)).map((entry) => [...entry]),
+    status: game.status,
+    created_at: game.createdAt,
+    last_activity: game.lastActivity,
+    blob_key: maybeBytes(game.blobKey),
+    cancel_token: game.cancelToken ?? null,
+    expires_at: game.expiresAt ?? null,
+    dictionary: hexBytes(game.dictionary),
+    invited_contact: maybeBytes(game.invitedContact),
+    mailbox: game.mailbox ? { id: game.mailbox.id, message_id: game.mailbox.messageId } : null,
+    opponent_name: game.opponentName ?? null,
+    your_turn: game.yourTurn ?? null,
+    last_play: game.lastPlay ?? null,
+    outcome: game.outcome ?? null,
+  };
+}
 
 /**
  * Builds the encrypted backup.
  *
- * Games still waiting for someone to join are skipped: they have no opponent,
- * no key agreement, and nothing to restore.
+ * Every game goes in, including ones still waiting for someone to join: they
+ * carry their own half of the link and the token that withdraws it, so a
+ * restored device can go on waiting for the same person.
  */
 export async function exportBackup(passphrase: string): Promise<Uint8Array> {
   const { core, identity } = await loadIdentity();
-
-  const games = (await listGames()).filter((game): game is GameRecord & { claimerPubKey: string } =>
-    Boolean(game.claimerPubKey),
-  );
 
   const bundle: BundleJson = {
     v: EXPORT_VERSION,
@@ -69,19 +114,9 @@ export async function exportBackup(passphrase: string): Promise<Uint8Array> {
       name: contact.name,
       first_seen: contact.firstSeen,
     })),
-    games: await Promise.all(
-      games.map(async (game) => ({
-        game_id: bytes(game.gameId),
-        plugin_id: game.pluginId,
-        plugin_version: game.pluginVersion,
-        initiator_pub_key: bytes(game.initiatorPubKey),
-        claimer_pub_key: bytes(game.claimerPubKey),
-        blob_id: bytes(game.blobId),
-        seed: bytes(game.seed),
-        entries: (await loadEntries(game.gameId)).map((entry) => [...entry]),
-      })),
-    ),
+    games: await Promise.all((await listGames()).map(gameToJson)),
     exported_at: Date.now(),
+    devices: [],
   };
 
   return core.exportBundle(passphrase, JSON.stringify(bundle), randomBytes(16), randomBytes(24));
@@ -119,22 +154,8 @@ export async function importBackup(passphrase: string, file: Uint8Array): Promis
   for (const game of bundle.games) {
     const gameId = toBase64Url(new Uint8Array(game.game_id));
     const initiator = toBase64Url(new Uint8Array(game.initiator_pub_key));
-    const claimer = toBase64Url(new Uint8Array(game.claimer_pub_key));
 
-    await gamesStore.put({
-      gameId,
-      blobId: toBase64Url(new Uint8Array(game.blob_id)),
-      pluginId: game.plugin_id,
-      pluginVersion: game.plugin_version,
-      // Role follows from which key is ours, not from what the file claims.
-      role: initiator === mine ? 'initiator' : 'claimer',
-      initiatorPubKey: initiator,
-      claimerPubKey: claimer,
-      seed: toBase64Url(new Uint8Array(game.seed)),
-      status: 'active',
-      createdAt: now,
-      lastActivity: now,
-    } satisfies GameRecord);
+    await gamesStore.put(gameFromJson(game, gameId, initiator === mine, now));
 
     for (const [seq, entry] of game.entries.entries()) {
       await entriesStore.put({ gameId, seq, entry: new Uint8Array(entry) });
@@ -171,6 +192,53 @@ export async function importBackup(passphrase: string, file: Uint8Array): Promis
     contacts: bundle.contacts.length,
     publicKey: mine,
   };
+}
+
+/** Turns one bundle entry back into the record the app keeps. */
+export function gameFromJson(
+  game: GameJson,
+  gameId: string,
+  mine: boolean,
+  now: number,
+): GameRecord {
+  const b64 = (value: number[] | null) =>
+    value === null ? undefined : toBase64Url(new Uint8Array(value));
+
+  return {
+    gameId,
+    blobId: toBase64Url(new Uint8Array(game.blob_id)),
+    pluginId: game.plugin_id,
+    pluginVersion: game.plugin_version,
+    // Role follows from which key is ours, not from what the file claims.
+    role: mine ? 'initiator' : 'claimer',
+    initiatorPubKey: toBase64Url(new Uint8Array(game.initiator_pub_key)),
+    claimerPubKey: b64(game.claimer_pub_key),
+    seed: toBase64Url(new Uint8Array(game.seed)),
+    status: isStatus(game.status) ? game.status : 'active',
+    // Versions before 3 carried no timestamps, and wrote zero rather than
+    // guessing. Now is the honest answer for those, and it keeps the list from
+    // sorting a restored game to the bottom of history.
+    createdAt: game.created_at || now,
+    lastActivity: game.last_activity || now,
+    blobKey: b64(game.blob_key),
+    cancelToken: game.cancel_token ?? undefined,
+    expiresAt: game.expires_at ?? undefined,
+    dictionary: game.dictionary
+      ? game.dictionary.map((byte) => byte.toString(16).padStart(2, '0')).join('')
+      : undefined,
+    invitedContact: b64(game.invited_contact),
+    mailbox: game.mailbox ? { id: game.mailbox.id, messageId: game.mailbox.message_id } : undefined,
+    opponentName: game.opponent_name ?? undefined,
+    yourTurn: game.your_turn ?? undefined,
+    lastPlay: game.last_play ?? undefined,
+    outcome: game.outcome ?? undefined,
+  };
+}
+
+const STATUSES = ['pending', 'active', 'finished', 'expired', 'incompatible'] as const;
+
+function isStatus(value: string): value is GameRecord['status'] {
+  return (STATUSES as readonly string[]).includes(value);
 }
 
 /** Offers the backup as a download. */

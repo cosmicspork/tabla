@@ -10,6 +10,7 @@
 //! The relay never links against this crate. It cannot: it holds no keys and
 //! verifies nothing.
 
+pub mod device;
 pub mod error;
 pub mod export;
 pub mod identity;

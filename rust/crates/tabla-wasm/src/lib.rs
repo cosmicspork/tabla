@@ -11,6 +11,7 @@
 
 pub mod deal;
 
+use tabla_core::device::{self, DEVICE_ID_LEN, DEVICE_NOTICE_VERSION, DeviceNotice, NoticeBody};
 use tabla_core::error::CryptoError;
 use tabla_core::export::{ExportBundle, KdfParams};
 use tabla_core::identity::parse_public_key;
@@ -190,6 +191,66 @@ impl Identity {
     pub fn derive_deal_secret(&self, game_id: &[u8]) -> Result<Vec<u8>, JsError> {
         let game_id = fixed::<GAME_ID_LEN>(game_id, "gameId")?;
         Ok(self.inner.deal_secret(&game_id).to_vec())
+    }
+
+    /// Where this person's device `deviceId` reads its notices.
+    ///
+    /// Derived from the identity seed, so every device of this person can
+    /// address every other, and nobody else can address any of them.
+    #[wasm_bindgen(js_name = deviceMailbox)]
+    pub fn device_mailbox(&self, device_id: &[u8]) -> Result<Vec<u8>, JsError> {
+        let device_id = fixed::<DEVICE_ID_LEN>(device_id, "deviceId")?;
+        Ok(device::device_mailbox_id(&self.inner.seed(), &device_id).to_vec())
+    }
+
+    /// Seals a notice for one of this person's other devices.
+    ///
+    /// `body` is the JSON form of a notice body, the same shape `openDeviceNotice`
+    /// returns. The version is stamped here rather than taken from the caller,
+    /// so a notice can never claim to be a format this build did not write.
+    #[wasm_bindgen(js_name = sealDeviceNotice)]
+    pub fn seal_device_notice(
+        &self,
+        to_device_id: &[u8],
+        from_device_id: &[u8],
+        nonce: &[u8],
+        sent_at: u64,
+        body: &str,
+    ) -> Result<Vec<u8>, JsError> {
+        let seed = self.inner.seed();
+        let id =
+            device::device_mailbox_id(&seed, &fixed::<DEVICE_ID_LEN>(to_device_id, "toDeviceId")?);
+
+        let notice = DeviceNotice {
+            v: DEVICE_NOTICE_VERSION,
+            from: fixed::<DEVICE_ID_LEN>(from_device_id, "fromDeviceId")?,
+            sent_at,
+            body: serde_json_from_str::<NoticeBody>(body)?,
+        };
+
+        notice
+            .seal(
+                &device::device_mailbox_key(&seed, &id),
+                &fixed::<NONCE_LEN>(nonce, "nonce")?,
+                &id,
+            )
+            .map_err(crypto_err)
+    }
+
+    /// Opens a notice left for this device, as JSON.
+    #[wasm_bindgen(js_name = openDeviceNotice)]
+    pub fn open_device_notice(
+        &self,
+        my_device_id: &[u8],
+        sealed: &[u8],
+    ) -> Result<String, JsError> {
+        let seed = self.inner.seed();
+        let id =
+            device::device_mailbox_id(&seed, &fixed::<DEVICE_ID_LEN>(my_device_id, "deviceId")?);
+
+        let notice = DeviceNotice::open(&device::device_mailbox_key(&seed, &id), &id, sealed)
+            .map_err(crypto_err)?;
+        serde_json_to_string(&notice)
     }
 
     /// Derives the symmetric key protecting one game's entries.
@@ -497,6 +558,26 @@ impl Session {
         self.seal(seq, nonce, &EntryBody::Resign)
     }
 
+    /// Claims the next move for one of this person's own devices.
+    ///
+    /// Never appended. It goes to the relay, which holds it with an expiry and
+    /// hands it to this player's other sockets — see `tabla_core::device`.
+    #[wasm_bindgen(js_name = sealHold)]
+    pub fn seal_hold(&self, nonce: &[u8], device_id: &[u8]) -> Result<Vec<u8>, JsError> {
+        self.inner
+            .seal_hold(
+                &fixed::<NONCE_LEN>(nonce, "nonce")?,
+                &fixed::<DEVICE_ID_LEN>(device_id, "deviceId")?,
+            )
+            .map_err(crypto_err)
+    }
+
+    /// Reads a hold token, returning the device holding the turn.
+    #[wasm_bindgen(js_name = openHold)]
+    pub fn open_hold(&self, sealed: &[u8]) -> Result<Vec<u8>, JsError> {
+        Ok(self.inner.open_hold(sealed).map_err(crypto_err)?.to_vec())
+    }
+
     /// Which role must author the entry at a given position.
     #[wasm_bindgen(js_name = expectedAuthor)]
     pub fn expected_author(seq: u32) -> u8 {
@@ -620,6 +701,23 @@ impl Log {
 
         self.entries.push(entry);
         Ok(encoded)
+    }
+
+    /// Drops everything after `seq`, leaving it as the tip.
+    ///
+    /// The one way a log ever gets shorter, and it is local-only: it undoes
+    /// entries this device wrote and the relay never accepted, which happens
+    /// when another of your own devices got its move in first. Entries the
+    /// relay has acknowledged are somebody else's history too and are never
+    /// truncated — a log that disagrees with the relay about those is diverged,
+    /// and stays diverged.
+    ///
+    /// `keep` is a count, not a sequence number, so that emptying a log is
+    /// `truncate(0)` rather than a negative seq. The two are interchangeable
+    /// anyway: an entry's sequence is its index, so keeping `n` entries leaves
+    /// `n - 1` as the tip.
+    pub fn truncate(&mut self, keep: u32) {
+        self.entries.truncate(keep as usize);
     }
 
     /// The encoded entry at a position.

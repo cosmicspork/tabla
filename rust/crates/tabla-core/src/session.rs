@@ -10,6 +10,7 @@
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
 
+use crate::device::{DEVICE_ID_LEN, HOLD_VERSION, HoldToken, hold_aad};
 use crate::error::CryptoError;
 use crate::log::{Entry, Participants};
 use crate::{GAME_ID_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN};
@@ -127,6 +128,40 @@ impl Session {
     pub fn open_body(&self, seq: u32, payload: &[u8]) -> Result<EntryBody, CryptoError> {
         let plaintext = crate::seal::open(&self.key, &self.aad(seq), payload)?;
         postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)
+    }
+
+    /// Seals a claim on the next move for this person's other devices.
+    ///
+    /// Under the game key, which every device of both players holds — so the
+    /// opponent could open one, and learn only that a device with an id it has
+    /// never seen is thinking. The relay, which routes it, cannot open it at
+    /// all. See [`crate::device::HoldToken`] for why this is not a log entry.
+    pub fn seal_hold(
+        &self,
+        nonce: &[u8; NONCE_LEN],
+        device_id: &[u8; DEVICE_ID_LEN],
+    ) -> Result<Vec<u8>, CryptoError> {
+        let token = HoldToken {
+            v: HOLD_VERSION,
+            device_id: *device_id,
+        };
+        let plaintext = postcard::to_allocvec(&token).map_err(|_| CryptoError::BadEncoding)?;
+        crate::seal::seal(&self.key, nonce, &hold_aad(&self.game_id), &plaintext)
+    }
+
+    /// Opens a hold token, returning the device that holds the turn.
+    pub fn open_hold(&self, sealed: &[u8]) -> Result<[u8; DEVICE_ID_LEN], CryptoError> {
+        let plaintext = crate::seal::open(&self.key, &hold_aad(&self.game_id), sealed)?;
+
+        let (version, _) =
+            postcard::take_from_bytes::<u16>(&plaintext).map_err(|_| CryptoError::BadEncoding)?;
+        if version != HOLD_VERSION {
+            return Err(CryptoError::UnsupportedVersion(version));
+        }
+
+        let token: HoldToken =
+            postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)?;
+        Ok(token.device_id)
     }
 
     /// The role that authored an entry, or `None` if the author is a stranger.
