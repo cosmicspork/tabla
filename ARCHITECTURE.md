@@ -487,8 +487,10 @@ say. It is passed in because a plugin cannot fetch anything, and it is
 **untrusted**: a game that reads assets verifies them against a hash carried in
 its own configuration, which is itself pinned in the invite both players agreed
 to. Two clients reading different word lists would disagree about whether a
-challenged word is real, which is exactly the desync the determinism rule exists
-to prevent. A game that needs no reference data is handed an empty slice and
+played word is real, and since version 3 of the word game that is not a dispute
+but a fork: one device would seal an entry the other refuses to replay. This is
+exactly the desync the determinism rule exists to prevent, and it is why the
+list is pinned by hash rather than merely shipped alongside. A game that needs no reference data is handed an empty slice and
 must behave identically whatever it is given; a test asserts that of tic tac
 toe.
 
@@ -505,8 +507,8 @@ The purity is structural, not a convention:
   at all. The plugin binary therefore holds no key material and links nothing
   that could use one. A test asserts this by scanning the built artifact for the
   symbols that would say otherwise, so the split cannot quietly collapse into a
-  single module. (For scale: the core is ~284 KB, the bundled plugin module
-  ~100 KB, and the downloadable word game a further ~195 KB.)
+  single module. (For scale: the core is ~370 KB, the bundled plugin module
+  ~100 KB, and the downloadable word game a further ~200 KB.)
 
   A game with hidden state does hash — commitments and the tile draw are
   SHA-256 over public values, and the point of them is that the opponent can
@@ -611,6 +613,15 @@ straightforward: a device that discards storage after a week of inactivity, and
 a player who removed the game and came back, are the same case, handled by the
 same line — fetch it again.
 
+Superseded rules are removed without being asked about. A version is held only
+because a game in progress agreed to it, so once the last such game is finished
+it is holding nothing — and a player who has to reason about which version of a
+game they need has been handed the wrong job. The storage page says how much it
+freed rather than asking first. Removal never touches a file another installed
+version still needs: two versions of the word game share a list, and the same
+sharing is why a game's size is counted by distinct file rather than by summing
+its versions.
+
 ### What "downloadable" does not mean
 
 The rules download; the app does not. A game's board component, its loader
@@ -677,8 +688,9 @@ public too.
 opponent's next entry carries shares for the next `n` positions — an entry that
 was going to exist anyway. Nothing is handed over before the play that earns it
 is already public, which is what lets all of this work at correspondence pace.
-A successful challenge cancels the refill along with the play, and nothing was
-pre-issued to take back.
+Since version 3 there is no move that takes a play back off the board, so
+nothing can cancel a refill; under versions 1 and 2 a successful challenge did,
+and nothing had been pre-issued to claw back.
 
 ### What it costs
 
@@ -739,8 +751,10 @@ physical tile at once, so tile counting was soft, and a cheat was only ever
 *detectable*. Under the deal there is one real deck, tile counting is exact, and
 cheating is impossible rather than visible.
 
-Games started under version 1 finish under version 1. Its rules, its module and
-its hash stay exactly where they were; see **Plugin distribution**.
+A game finishes under the rules it started with, whichever version those are.
+Every shipped version's rules, module and hash stay exactly where they were —
+there are three of the word game now — and the app carries all of them; see
+**Plugin distribution**.
 
 ## Letras
 
@@ -748,8 +762,8 @@ The word game. Its rules live in `tabla-letras` and are summarised here only
 where they bear on the protocol; the crate documentation has the rest.
 
 **Turn structure.** The log alternates strictly, so every turn is an entry:
-passing, exchanging, yielding the opening, and forfeiting a challenged turn are
-all moves. A game opens with the deal's ceremony — key shares, two shuffles, and
+passing, exchanging and yielding the opening are all moves, as were challenging
+and forfeiting a challenged turn in versions 1 and 2. A game opens with the deal's ceremony — key shares, two shuffles, and
 the opening racks — which also carries the toss for who plays first, and then a
 yield if it went against whoever holds the next slot.
 
@@ -806,8 +820,21 @@ omitted it would be worthless.
 
 ```
 "TABLAEXPORT1" || argon2 params || salt || nonce ||
-  XChaCha20-Poly1305( postcard{ identity_seed, contacts, logs } )
+  XChaCha20-Poly1305( postcard{ v, identity_seed, contacts, games, exported_at, name } )
 ```
+
+`name` is the display name, added in version 2, and it travels because it
+belongs to the identity rather than to the phone: a device that restored
+everything except what it is called would introduce itself to everyone it met
+next as nobody, and nothing would say so — the people it had already played
+cached the name on their own side. What deliberately stays behind is the rest of
+the device's local preferences (theme, whether notifications were wanted), which
+belong to the phone.
+
+A backup is the one thing here expected to be *old*: the point of one is that it
+opens after the phone that wrote it is gone. So version 1 files, which have no
+name, are still read — the version is decoded first and the rest to match, for
+the same reason as the invite.
 
 ## What is not automatically verifiable
 
@@ -834,6 +861,14 @@ worse than one that names them:
   relay that lost data or is lying about history. It cannot protect against
   someone with database access deleting the row; that is outside the threat
   model and no client-side protocol can fix it.
+- **Who is talking to whom, against a relay that watches timing.** A pair
+  mailbox hides both parties: the id is derived from a secret only they can
+  compute, and the body is sealed. What it cannot hide is that an invite was
+  created and a mailbox written to from the same address moments apart, from
+  which a relay can infer that some pair exists and is arranging a game. The
+  game room that follows shows both participants' key hashes anyway, so this
+  adds no identity the relay did not already get — but it is an inference the
+  design permits rather than prevents. See **Inviting a contact**.
 - **A rewritten app bundle.** The plugin manifest is signed, but the signature,
   the manifest, and the key that checks it all ship together — so it detects a
   changed *artifact*, not a changed *app*. Whoever serves the app is trusted to
@@ -852,8 +887,45 @@ worse than one that names them:
    step — see **The deal**. It was specified as a separate real-time tier; it
    turned out not to need one, and the tiers collapsed. Presence landed with it,
    for every game.
+5. **Done:** the product layer the protocol had been waiting for. People have
+   names, carried inside the invite and the log's prologue and never seen by the
+   relay; a second game against someone you have played reaches them through a
+   pair mailbox instead of a link; and words are checked as they are played,
+   which retired the challenge. See **Names in the log**, **Inviting a
+   contact**, and **Letras**.
+
+   Most of this was possible from phase 1 and simply had not been built. The
+   contact picker in particular had been promised in this document, under
+   **Identity**, since before there was a relay to promise it about.
 
 ## Roadmap
+
+**Playing from more than one device.** Today an identity lives on exactly one
+device, and a backup *moves* it rather than copying it. That is not a UI
+limitation to be lifted later — it falls out of the log. Two devices holding the
+same signing key would both be the legitimate author of the entry at a given
+sequence, and the moment both wrote one the log would fork with two validly
+signed continuations and no rule for choosing between them. The app says so
+plainly in Profile rather than leaving people to discover it.
+
+Doing it properly means the identity stops being one keypair:
+
+- A **root identity** that signs, and per-device **subkeys** it delegates to,
+  with the delegation carried in the log so an opponent can check that a device
+  speaks for the player it claims. `Participants` and `expected_author` widen
+  from "this key" to "any key this root has vouched for".
+- A rule for **who owns a turn**, because delegation alone does not prevent two
+  of your own devices answering the same move. Simplest is a lease in the log:
+  a device claims the next entry, and another may take the claim over only after
+  it has expired.
+- Key derivation follows: `agree_game_key` is between two *identities*, so it
+  has to be the root pair rather than whichever device is holding the socket.
+- And the deal has per-device secrets in it — `deriveDealSecret` is derived from
+  the identity seed, which every device of yours would share. That is fine, but
+  it wants saying out loud rather than assuming.
+
+None of this is started. It is the largest single thing left, and unlike the
+rest of this list it is protocol work rather than a product decision.
 
 **Live games, with a clock.** Presence tells you the other player is there; it
 does nothing else. A per-game choice between correspondence and live would add a
