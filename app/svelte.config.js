@@ -1,5 +1,19 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import adapter from '@sveltejs/adapter-static';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+
+/**
+ * The released version, read from the manifest release-please maintains.
+ *
+ * Taken from the repository root rather than this package's own `version` so
+ * there is one answer to what version the app is, and it is the one the tags
+ * and the changelog agree on.
+ */
+const { '.': APP_VERSION } = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../.release-please-manifest.json', import.meta.url)), 'utf8'),
+);
 
 /**
  * tabla is a local-first, end-to-end encrypted app: there is nothing for a
@@ -13,6 +27,9 @@ export default {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter({ fallback: 'index.html', strict: false }),
+    // Names the build after the release rather than a timestamp, which is what
+    // the About page shows and what SvelteKit compares to notice an update.
+    version: { name: APP_VERSION },
     // Registered automatically. It caches the app shell only; game data lives
     // in IndexedDB and is never written to a cache.
     //

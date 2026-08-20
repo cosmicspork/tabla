@@ -26,6 +26,7 @@ import {
   pluginBytes,
   removePlugin,
   assetBytes,
+  storedBytesForGame,
   InstallError,
 } from './install.ts';
 import { forgetManifest, verifiedManifest } from './manifest.ts';
@@ -264,5 +265,29 @@ describe('InstallError', () => {
   it('is thrown, not returned, so a caller cannot ignore it', async () => {
     served = () => new Response('gone', { status: 404 });
     await expect(pluginBytes('letras', LETRAS_VERSION)).rejects.toBeInstanceOf(InstallError);
+  });
+});
+
+describe('how much room a game is using', () => {
+  it('counts a file shared by two versions once', async () => {
+    await installPlugin('letras', LETRAS_VERSION);
+
+    const versions = manifest.plugins
+      .filter((plugin) => plugin.id === 'letras')
+      .map((plugin) => plugin.version);
+    expect(versions.length).toBeGreaterThan(1);
+
+    const total = await storedBytesForGame('letras', versions);
+    const summed = (
+      await Promise.all(versions.map((version) => installedState('letras', version)))
+    ).reduce((bytes, state) => bytes + state.storedBytes, 0);
+
+    // Both versions read the same word list, so adding their sizes together
+    // reports space that removing the game could not give back.
+    expect(summed).toBeGreaterThan(total);
+
+    // The honest figure is the current version's module plus that one list.
+    const current = await installedState('letras', LETRAS_VERSION);
+    expect(total).toBe(current.storedBytes);
   });
 });

@@ -118,6 +118,34 @@ export async function installedState(pluginId: string, version: number): Promise
 }
 
 /**
+ * How much of this device a game is using, across every version of it.
+ *
+ * Counted by distinct file, not by summing the per-version states: two
+ * versions of one game share a word list, and adding their sizes together
+ * would report half a megabyte that does not exist and promise space that
+ * removing the game could not give back.
+ */
+export async function storedBytesForGame(pluginId: string, versions: number[]): Promise<number> {
+  const entries = await Promise.all(
+    versions.map((version) => entryFor(pluginId, version).catch(() => null)),
+  );
+
+  const files = new Map<string, number>();
+  for (const entry of entries) {
+    if (!entry) continue;
+    for (const file of [entry.module, ...entry.assets]) files.set(file.sha256, file.bytes);
+  }
+
+  const hashes = [...files.keys()];
+  const present = await Promise.all(hashes.map((hash) => getBlob(hash)));
+
+  return hashes.reduce(
+    (total, hash, index) => total + (present[index] === undefined ? 0 : (files.get(hash) ?? 0)),
+    0,
+  );
+}
+
+/**
  * Frees everything downloaded for a game.
  *
  * Safe at any time: a game that needs it again downloads it again. Files

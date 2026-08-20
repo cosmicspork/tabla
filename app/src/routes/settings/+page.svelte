@@ -1,13 +1,28 @@
 <script lang="ts">
-  import BackupPanel from '$lib/components/BackupPanel.svelte';
-  import GamesOnDevice from '$lib/components/GamesOnDevice.svelte';
-  import { listContacts } from '$lib/db/store.ts';
-  import type { ContactRecord } from '$lib/db/schema.ts';
+  /**
+   * The settings hub.
+   *
+   * One row per thing a person controls, in the order they are likely to want
+   * them: who I am, who I play, whether I am told, how it looks, and then the
+   * rare and the merely informative. Each summary is read from the thing it
+   * describes, so the hub answers most questions without being opened.
+   */
+  import HubRow from '$lib/components/HubRow.svelte';
+  import { GLYPHS } from '$lib/components/SettingsGlyphs.ts';
+  import { getMeta, listContacts } from '$lib/db/store.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
+  import { pushAvailability, type PushAvailability } from '$lib/push.ts';
+  import { storedBytesForGame } from '$lib/plugin/install.ts';
+  import { allGames } from '$lib/registry.ts';
+  import { loadTheme, type ThemeChoice } from '$lib/theme.ts';
 
-  let publicKey = $state('');
-  let contacts = $state<ContactRecord[]>([]);
+  let key = $state('');
+  let contacts = $state<string[]>([]);
+  let availability = $state<PushAvailability | null>(null);
+  let theme = $state<ThemeChoice>('system');
+  let lastBackup = $state<number | undefined>(undefined);
+  let stored = $state(0);
 
   $effect(() => {
     pageTitle.text = 'Settings';
@@ -15,62 +30,109 @@
 
   $effect(() => {
     void (async () => {
-      publicKey = await myPublicKey();
-      contacts = await listContacts();
+      key = await myPublicKey();
+      contacts = (await listContacts()).map((contact) => contact.name);
+      availability = await pushAvailability();
+      theme = await loadTheme();
+      lastBackup = await getMeta<number>('lastBackupAt');
+      stored = await storedBytes();
     })();
   });
+
+  /** How much of this device the downloaded games are using, in total. */
+  async function storedBytes(): Promise<number> {
+    const downloadable = allGames().filter((entry) => entry.distribution === 'downloadable');
+    const byGame = new Map<string, number[]>();
+    for (const entry of downloadable) {
+      byGame.set(entry.id, [...(byGame.get(entry.id) ?? []), entry.version]);
+    }
+
+    const sizes = await Promise.all(
+      [...byGame.entries()].map(([id, versions]) =>
+        storedBytesForGame(id, versions).catch(() => 0),
+      ),
+    );
+    return sizes.reduce((total, size) => total + size, 0);
+  }
+
+  const profileSummary = $derived(key ? `${fingerprint(key)}… · this device only` : 'This device');
+
+  const peopleSummary = $derived(
+    contacts.length === 0
+      ? 'Nobody yet — they are added after a game'
+      : `${contacts.slice(0, 3).join(', ')}${contacts.length > 3 ? `, and ${contacts.length - 3} more` : ''}`,
+  );
+
+  const notificationsSummary = $derived.by(() => {
+    switch (availability) {
+      case 'enabled':
+        return 'On · a nudge when it is your turn';
+      case 'available':
+        return 'Off';
+      case 'needs-install':
+        return 'Add tabla to your Home Screen first';
+      case 'denied':
+        return 'Blocked for this site';
+      case 'unsupported':
+        return 'Not available in this browser';
+      default:
+        return 'Checking…';
+    }
+  });
+
+  const themeSummary = $derived(
+    theme === 'system' ? 'Follows your device' : theme === 'dark' ? 'Dark' : 'Light',
+  );
+
+  const backupSummary = $derived(
+    lastBackup === undefined
+      ? 'Never backed up'
+      : `Last backup ${new Date(lastBackup).toLocaleDateString()}`,
+  );
+
+  const storageSummary = $derived(
+    stored === 0
+      ? 'Nothing downloaded yet'
+      : `${Math.round(stored / 100_000) / 10} MB of downloaded games`,
+  );
 </script>
 
-<div class="stack">
-  <section class="card">
-    <h2>This device</h2>
-    <p class="muted">
-      Your identity key was generated here and has never left. There is no account, no email, and
-      nothing to look you up by.
-    </p>
-    <p class="mono key">{publicKey}</p>
-  </section>
-
-  <BackupPanel />
-
-  <GamesOnDevice />
-
-  <section class="card">
-    <h2>People you have played</h2>
-    {#if contacts.length === 0}
-      <p class="muted">Nobody yet. Contacts are saved after a game's first handshake.</p>
-    {:else}
-      <ul>
-        {#each contacts as contact (contact.publicKey)}
-          <li>
-            <span>{contact.name}</span>
-            <span class="mono muted">{fingerprint(contact.publicKey)}…</span>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
+<div class="hub">
+  <HubRow
+    href="/settings/profile"
+    title="Profile"
+    summary={profileSummary}
+    glyph={GLYPHS.profile}
+  />
+  <HubRow href="/settings/people" title="People" summary={peopleSummary} glyph={GLYPHS.people} />
+  <HubRow
+    href="/settings/notifications"
+    title="Notifications"
+    summary={notificationsSummary}
+    glyph={GLYPHS.notifications}
+  />
+  <HubRow
+    href="/settings/appearance"
+    title="Appearance"
+    summary={themeSummary}
+    glyph={GLYPHS.appearance}
+  />
+  <HubRow
+    href="/settings/backup"
+    title="Backup &amp; restore"
+    summary={backupSummary}
+    glyph={GLYPHS.backup}
+  />
+  <HubRow
+    href="/settings/storage"
+    title="Storage"
+    summary={storageSummary}
+    glyph={GLYPHS.storage}
+  />
+  <HubRow
+    href="/settings/about"
+    title="About"
+    summary="Version, and what the relay knows"
+    glyph={GLYPHS.about}
+  />
 </div>
-
-<style>
-  .key {
-    word-break: break-all;
-    font-size: 0.75rem;
-    color: var(--fg-muted);
-    margin: 0;
-  }
-
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 0.4rem;
-  }
-
-  li {
-    display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-  }
-</style>

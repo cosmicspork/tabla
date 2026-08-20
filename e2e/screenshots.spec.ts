@@ -135,14 +135,10 @@ test('games on this device: what was downloaded, and how to be rid of it', async
     timeout: 30_000,
   });
 
-  await page.goto('/settings');
-  const card = page.locator('li[data-plugin="letras"]').first();
-  await expect(card).toContainText('on this device');
+  await page.goto('/settings/storage');
+  await expect(page.locator('section[data-plugin="letras"]')).toContainText('on this device');
 
-  // The card sits below the identity and backup cards, so a plain screenshot
-  // catches the top of the page and none of the thing it is meant to show.
-  await card.scrollIntoViewIfNeeded();
-
+  // Storage is a page of its own now, so the whole of it is the picture.
   await page.screenshot({ path: `${OUT}/games.png` });
   await context.close();
   await second.close();

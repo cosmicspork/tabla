@@ -10,7 +10,17 @@
 import { fromBase64Url } from '@tabla/shared';
 import type { PushSubscriptionJson } from '@tabla/shared';
 
+import { getMeta, setMeta } from './db/store.ts';
 import { isIos, isStandalone } from './lifecycle.ts';
+
+/**
+ * Whether this device asked for notifications.
+ *
+ * Distinct from whether it *can* have them: a person who has never been asked
+ * and one who turned them off look identical to the browser, and the settings
+ * page needs to tell those apart.
+ */
+const PUSH_PREFERENCE = 'pushEnabled';
 
 export type PushAvailability =
   /** Ready to ask. */
@@ -82,6 +92,8 @@ export async function enablePush(): Promise<PushSubscriptionJson | null> {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return null;
 
+  await setMeta(PUSH_PREFERENCE, true);
+
   const registration = await navigator.serviceWorker.ready;
   const subscription =
     (await registration.pushManager.getSubscription()) ??
@@ -93,6 +105,31 @@ export async function enablePush(): Promise<PushSubscriptionJson | null> {
     }));
 
   return subscription.toJSON() as PushSubscriptionJson;
+}
+
+/**
+ * Turns notifications off for this device.
+ *
+ * Unsubscribing is the whole of it: the relay keeps a subscription per game
+ * room, and there is no message on the wire for withdrawing one — but a push to
+ * an unsubscribed endpoint comes back 404 or 410, and the room drops the row
+ * when it does. So the rows lapse rather than being deleted, and nothing is
+ * ever delivered in the meantime.
+ *
+ * The browser permission is deliberately left alone. Only the person can grant
+ * or revoke that, and taking it away here would mean asking for it again later.
+ */
+export async function disablePush(): Promise<void> {
+  await setMeta(PUSH_PREFERENCE, false);
+
+  const registration = await navigator.serviceWorker.getRegistration();
+  const subscription = await registration?.pushManager.getSubscription();
+  await subscription?.unsubscribe();
+}
+
+/** Whether this device has asked for notifications, as opposed to being able to. */
+export async function pushPreference(): Promise<boolean> {
+  return (await getMeta<boolean>(PUSH_PREFERENCE)) ?? false;
 }
 
 /** The current subscription, if this device already has one. */
