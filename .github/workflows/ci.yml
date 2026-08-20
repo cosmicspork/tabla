@@ -104,4 +104,5 @@ jobs:
           path: |
             e2e/playwright-report
             test-results
+            ~/.config/.wrangler/logs
           retention-days: 7
