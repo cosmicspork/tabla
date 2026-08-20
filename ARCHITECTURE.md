@@ -15,7 +15,10 @@ What the relay unavoidably knows, and what we accept as the threat model:
 
 - that two identity-key hashes are playing *some* game together,
 - roughly when each move happened and how big it was,
-- IP addresses at connection time (Cloudflare's, not ours, but real).
+- IP addresses at connection time (Cloudflare's, not ours, but real),
+- that an opaque mailbox id exists, is being written to, and is being polled —
+  see **Inviting a contact**, which also says why that is not a new kind of
+  knowledge.
 
 What it never knows: game type, board state, moves, outcomes, display names,
 or anything derived from them.
@@ -274,6 +277,53 @@ as they were, and a build with no name to give still writes the old one.
 Both names are inside things the relay cannot read — a sealed blob and a signed,
 encrypted log entry — so nothing about this reaches it.
 
+### Inviting a contact
+
+A link is how you reach a stranger. After one finished game it is no longer
+needed: both sides hold the other's identity key, so both can compute the same
+X25519 secret, and that is enough to agree on somewhere to leave an invitation.
+
+```
+pair       = X25519(mine, peer)
+mailboxId  = HKDF(ikm = pair, salt = "tabla-mailbox/v1",     info = "to" || recipient)[0..16]
+mailboxKey = HKDF(ikm = pair, salt = "tabla-mailbox-msg/v1", info = mailboxId)
+body       = XChaCha20-Poly1305(mailboxKey, nonce, aad = "tabla-mailbox/v1" || mailboxId,
+                                postcard{ blob_id, blob_key, plugin_id, plugin_version, created_at })
+```
+
+The id is per direction, so a recipient polls only its own inbox. `POST
+/api/mailbox/<id>` leaves a message, `POST /api/mailbox/poll` reads up to 64 at
+once, `DELETE /api/mailbox/<id>/<messageId>` drops one, and `PUT
+/api/mailbox/<id>/push` registers for a content-free nudge.
+
+**Why nothing is signed.** The id is a 128-bit capability derived from a secret
+only two people can compute: anyone able to name a mailbox is already entitled
+to write to it. A signature would have to be checked against a key derived from
+that same secret, so it would admit exactly the same principals — buying no
+access control, while making the relay verify signatures for the first time and
+store a key per mailbox. Storage is bounded by a cap instead (16 pending), and
+the client's remedy for a contact who abuses it is to remove them, after which
+it stops polling that mailbox at all.
+
+**Why the invite blob stays where it was.** The message carries the two halves
+of the link and nothing else, so the single-use claim, the cancel token, and
+everything built on them are untouched. It also lets a recipient decline
+without claiming — claiming is spending.
+
+**What the relay learns.** A stable opaque id per pair and direction, that it is
+written to and polled, and when. It can correlate a mailbox write with an invite
+created moments earlier from the same address, and so guess that the two are
+related — which tells it no more than the game room it leads to, where both
+participants' key hashes are visible anyway. It never learns a public key, a
+name, a game, or who invited whom.
+
+**Two caveats worth stating.** The same identity restored on another device
+derives the same mailboxes, which is what you want; two devices live at once
+would race to consume the same message, which is one more reason a restore is a
+move rather than a merge. And an invitation is a bearer token like any other, so
+accepting one checks that the invite's initiator key really is the contact whose
+mailbox it came from.
+
 ### Single-use claim
 
 The link is a bearer token, and exactly one person may redeem it. A pending-invite
@@ -388,7 +438,8 @@ client-side protocol can prevent it.
 
 ## Push notifications
 
-Push payloads are **content-free**: at most an opaque `gameId`. The client fetches
+Push payloads are **content-free**: at most an opaque `gameId`, or an opaque
+`mailbox` id when an invitation has arrived from a contact. The client fetches
 and decrypts real state when opened. RFC 8291 encrypts payloads in transit, but
 APNs and FCM still relay them, and a notification that says what your opponent
 just played is exactly the leak this project exists to avoid.

@@ -6,6 +6,7 @@
    * notified about is how a person ends up saying no permanently.
    */
   import { isIos } from '$lib/lifecycle.ts';
+  import { registerInboxPush } from '$lib/mailbox.ts';
   import { enablePush, pushAvailability, type PushAvailability } from '$lib/push.ts';
   import type { PushSubscriptionJson } from '@tabla/shared';
 
@@ -24,6 +25,9 @@
       const subscription = await enablePush();
       if (subscription) {
         onsubscribe(subscription);
+        // Turns are not the only thing worth being told about: an invitation
+        // from someone you have played lands in a mailbox, not a game room.
+        void registerInboxPush(subscription);
         availability = 'enabled';
       } else {
         availability = await pushAvailability();

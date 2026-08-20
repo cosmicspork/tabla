@@ -45,7 +45,16 @@ export async function sendPush(
     };
 
     const request = await buildPushPayload(
-      { data: payload, options: { ttl: 60 * 60 * 24, urgency: 'normal', topic: payload.gameId } },
+      {
+        data: payload,
+        // The topic collapses repeats: a second nudge about the same game or
+        // the same mailbox replaces the first rather than stacking.
+        options: {
+          ttl: 60 * 60 * 24,
+          urgency: 'normal',
+          topic: 'gameId' in payload ? payload.gameId : payload.mailbox,
+        },
+      },
       target,
       {
         subject: env.VAPID_SUBJECT,

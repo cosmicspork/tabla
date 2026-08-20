@@ -126,7 +126,55 @@ export const ErrorCode = {
   Expired: 'expired',
   NotFound: 'not_found',
   Forbidden: 'forbidden',
+  MailboxFull: 'mailbox_full',
 } as const;
+
+// ---------------------------------------------------------------------------
+// Pair mailboxes
+// ---------------------------------------------------------------------------
+
+/**
+ * Where one player leaves an invitation for another.
+ *
+ * Opaque to the relay in the strongest sense available: it is derived from a
+ * secret only the two of them can compute, so it cannot be linked to either
+ * public key, and cannot be guessed or enumerated. See ARCHITECTURE,
+ * "Inviting a contact".
+ */
+export const mailboxIdSchema = b64url.length(22, 'mailboxId is 16 bytes in base64url');
+export const messageIdSchema = b64url.length(22, 'messageId is 16 bytes in base64url');
+
+export const postMailboxRequestSchema = z.object({
+  /** A sealed `MailboxInvite`. Small by construction; the cap is a backstop. */
+  body: b64url.max(2048),
+});
+export const postMailboxResponseSchema = z.object({
+  messageId: messageIdSchema,
+  expiresAt: z.number().int(),
+});
+
+/**
+ * Polling several mailboxes at once.
+ *
+ * One request rather than one per contact. It tells the relay how many
+ * mailboxes this device holds, which N parallel requests from one address would
+ * have told it anyway.
+ */
+export const pollMailboxRequestSchema = z.object({
+  ids: z.array(mailboxIdSchema).min(1).max(64),
+});
+export const mailboxMessageSchema = z.object({
+  messageId: messageIdSchema,
+  body: b64url,
+  createdAt: z.number().int(),
+});
+export const pollMailboxResponseSchema = z.object({
+  mailboxes: z.record(mailboxIdSchema, z.array(mailboxMessageSchema)),
+});
+
+export const mailboxPushRequestSchema = z.object({
+  subscription: pushSubscriptionSchema,
+});
 
 // ---------------------------------------------------------------------------
 // Push
@@ -137,5 +185,9 @@ export const ErrorCode = {
  * decrypts real state on open. Never add game content here — APNs and FCM
  * relay this even though RFC 8291 encrypts it in transit.
  */
-export const pushPayloadSchema = z.object({ gameId: gameIdSchema });
+export const pushPayloadSchema = z.union([
+  z.object({ gameId: gameIdSchema }),
+  /** Something is waiting in a mailbox. Which mailbox is opaque to the relay. */
+  z.object({ mailbox: mailboxIdSchema }),
+]);
 export type PushPayload = z.infer<typeof pushPayloadSchema>;

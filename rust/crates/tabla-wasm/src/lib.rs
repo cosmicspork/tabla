@@ -17,6 +17,7 @@ use tabla_core::identity::parse_public_key;
 use tabla_core::invite::{self, InviteConfig};
 use tabla_core::kex;
 use tabla_core::log::{self, Entry, Participants, Tombstone};
+use tabla_core::mailbox;
 use tabla_core::manifest;
 use tabla_core::session::{EntryBody, Role, SessionError};
 use tabla_core::{BLOB_ID_LEN, GAME_ID_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN, SEED_LEN, SIG_LEN};
@@ -108,6 +109,83 @@ impl Identity {
     ///
     /// Never published, never stored — see [`tabla_core::identity::Identity`].
     /// Held only long enough to build a [`DealSession`].
+    /// The mailbox this device writes to when inviting `peer`.
+    ///
+    /// The pair secret never leaves this module: JS gets an address, not a key.
+    #[wasm_bindgen(js_name = mailboxTo)]
+    pub fn mailbox_to(&self, peer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
+        let peer = parse_public_key(&fixed::<PUBKEY_LEN>(peer_public_key, "peer public key")?)
+            .map_err(crypto_err)?;
+        let pair = kex::shared_secret(&self.inner, &peer);
+        Ok(mailbox::mailbox_id(&pair, &peer.to_bytes()).to_vec())
+    }
+
+    /// The mailbox this device polls for invitations from `peer`.
+    #[wasm_bindgen(js_name = mailboxFrom)]
+    pub fn mailbox_from(&self, peer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
+        let peer = parse_public_key(&fixed::<PUBKEY_LEN>(peer_public_key, "peer public key")?)
+            .map_err(crypto_err)?;
+        let pair = kex::shared_secret(&self.inner, &peer);
+        Ok(mailbox::mailbox_id(&pair, &self.inner.public_key()).to_vec())
+    }
+
+    /// Seals an invitation for a contact to find.
+    #[wasm_bindgen(js_name = sealMailboxInvite)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn seal_mailbox_invite(
+        &self,
+        peer_public_key: &[u8],
+        nonce: &[u8],
+        blob_id: &[u8],
+        blob_key: &[u8],
+        plugin_id: &str,
+        plugin_version: u32,
+        created_at: u64,
+    ) -> Result<Vec<u8>, JsError> {
+        let peer = parse_public_key(&fixed::<PUBKEY_LEN>(peer_public_key, "peer public key")?)
+            .map_err(crypto_err)?;
+        let pair = kex::shared_secret(&self.inner, &peer);
+        let id = mailbox::mailbox_id(&pair, &peer.to_bytes());
+
+        let message = mailbox::MailboxInvite {
+            v: mailbox::MAILBOX_VERSION,
+            blob_id: fixed::<BLOB_ID_LEN>(blob_id, "blobId")?,
+            blob_key: fixed::<KEY_LEN>(blob_key, "blobKey")?,
+            plugin_id: plugin_id.to_string(),
+            plugin_version,
+            created_at,
+        };
+
+        message
+            .seal(
+                &mailbox::mailbox_key(&pair, &id),
+                &fixed::<NONCE_LEN>(nonce, "nonce")?,
+                &id,
+            )
+            .map_err(crypto_err)
+    }
+
+    /// Opens an invitation left by `peer`.
+    ///
+    /// Anything that does not open is not from them, which is the whole of the
+    /// authentication: only the two of them can produce a message this key
+    /// accepts.
+    #[wasm_bindgen(js_name = openMailboxInvite)]
+    pub fn open_mailbox_invite(
+        &self,
+        peer_public_key: &[u8],
+        sealed: &[u8],
+    ) -> Result<MailboxMessage, JsError> {
+        let peer = parse_public_key(&fixed::<PUBKEY_LEN>(peer_public_key, "peer public key")?)
+            .map_err(crypto_err)?;
+        let pair = kex::shared_secret(&self.inner, &peer);
+        let id = mailbox::mailbox_id(&pair, &self.inner.public_key());
+
+        let inner = mailbox::MailboxInvite::open(&mailbox::mailbox_key(&pair, &id), &id, sealed)
+            .map_err(crypto_err)?;
+        Ok(MailboxMessage { inner })
+    }
+
     #[wasm_bindgen(js_name = deriveDealSecret)]
     pub fn derive_deal_secret(&self, game_id: &[u8]) -> Result<Vec<u8>, JsError> {
         let game_id = fixed::<GAME_ID_LEN>(game_id, "gameId")?;
@@ -289,6 +367,40 @@ pub fn seal_invite(
             &fixed::<NONCE_LEN>(nonce, "nonce")?,
         )
         .map_err(crypto_err)
+}
+
+/// An invitation found in a mailbox.
+#[wasm_bindgen]
+pub struct MailboxMessage {
+    inner: mailbox::MailboxInvite,
+}
+
+#[wasm_bindgen]
+impl MailboxMessage {
+    #[wasm_bindgen(getter, js_name = blobId)]
+    pub fn blob_id(&self) -> Vec<u8> {
+        self.inner.blob_id.to_vec()
+    }
+
+    #[wasm_bindgen(getter, js_name = blobKey)]
+    pub fn blob_key(&self) -> Vec<u8> {
+        self.inner.blob_key.to_vec()
+    }
+
+    #[wasm_bindgen(getter, js_name = pluginId)]
+    pub fn plugin_id(&self) -> String {
+        self.inner.plugin_id.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = pluginVersion)]
+    pub fn plugin_version(&self) -> u32 {
+        self.inner.plugin_version
+    }
+
+    #[wasm_bindgen(getter, js_name = createdAt)]
+    pub fn created_at(&self) -> u64 {
+        self.inner.created_at
+    }
 }
 
 /// Opens an invite blob with the key taken from the link fragment.

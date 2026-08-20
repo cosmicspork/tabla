@@ -16,6 +16,7 @@
   import { listContacts } from '$lib/db/store.ts';
   import type { ContactRecord } from '$lib/db/schema.ts';
   import { createGame } from '$lib/games.ts';
+  import { inviteContact } from '$lib/mailbox.ts';
   import { fingerprint } from '$lib/identity.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
   import { availableGames } from '$lib/registry.ts';
@@ -42,8 +43,13 @@
     creating = true;
     failure = null;
     try {
-      const { game } = await createGame(location.origin, chosen, undefined, opponent ?? undefined);
-      await goto(`/g/${encodeURIComponent(game.gameId)}`);
+      // Someone we have played can be invited where only they will find it.
+      // Someone new can only be reached by a link, which is what a link is for.
+      const gameId = opponent
+        ? (await inviteContact(location.origin, opponent, chosen)).gameId
+        : (await createGame(location.origin, chosen)).game.gameId;
+
+      await goto(`/g/${encodeURIComponent(gameId)}`);
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
       creating = false;
@@ -115,8 +121,8 @@
 
   {#if opponent}
     <p class="muted note">
-      The game will be called “{opponent.name}” on this device from the moment it is made. You still
-      have to send them the link — tabla has no way to deliver one on its own yet.
+      {opponent.name} will find this waiting the next time they open tabla. Nothing is sent to anybody:
+      it is left where only the two of you can look, and the relay cannot tell whose mailbox it is.
     </p>
   {/if}
 </div>

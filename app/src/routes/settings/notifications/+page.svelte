@@ -8,6 +8,7 @@
    * switch. So the page is a ladder, and each rung says what to do about it.
    */
   import { isIos } from '$lib/lifecycle.ts';
+  import { registerInboxPush } from '$lib/mailbox.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
   import {
     disablePush,
@@ -37,7 +38,10 @@
   async function turnOn() {
     busy = true;
     try {
-      await enablePush();
+      const subscription = await enablePush();
+      // Every mailbox this device watches, as well as the games it is in: an
+      // invitation arrives in one and a move in the other.
+      if (subscription) await registerInboxPush(subscription).catch(() => {});
       await refresh();
     } finally {
       busy = false;

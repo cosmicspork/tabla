@@ -3,6 +3,9 @@ import {
   claimInviteResponseSchema,
   createInviteResponseSchema,
   inviteClaimStatusSchema,
+  pollMailboxResponseSchema,
+  postMailboxResponseSchema,
+  type PushSubscriptionJson,
 } from '@tabla/shared';
 import type { SocketLike } from './sync/engine.ts';
 
@@ -87,4 +90,54 @@ export function openGameSocket(gameId: string): Promise<SocketLike> {
     socket.addEventListener('open', onOpen, { once: true });
     socket.addEventListener('error', onError, { once: true });
   });
+}
+
+// -- pair mailboxes ---------------------------------------------------------
+
+/**
+ * Leaves a sealed invitation where a contact will look for it.
+ *
+ * No credential beyond the address: it is derived from a secret only the two of
+ * them can compute, so being able to name it is the authorisation. See
+ * ARCHITECTURE, "Inviting a contact".
+ */
+export async function postMailbox(
+  mailboxId: string,
+  body: string,
+): Promise<{ messageId: string; expiresAt: number }> {
+  return postMailboxResponseSchema.parse(
+    await unwrap(await post(`/api/mailbox/${mailboxId}`, { body })),
+  );
+}
+
+/** Reads every mailbox this device holds, in one request. */
+export async function pollMailboxes(
+  ids: string[],
+): Promise<Record<string, { messageId: string; body: string; createdAt: number }[]>> {
+  const parsed = pollMailboxResponseSchema.parse(
+    await unwrap(await post('/api/mailbox/poll', { ids })),
+  );
+  return parsed.mailboxes as Record<
+    string,
+    { messageId: string; body: string; createdAt: number }[]
+  >;
+}
+
+/** Drops a message, once it is safely on this device. */
+export async function deleteMailboxMessage(mailboxId: string, messageId: string): Promise<void> {
+  await unwrap(await fetch(`/api/mailbox/${mailboxId}/${messageId}`, { method: 'DELETE' }));
+}
+
+/** Asks to be nudged when something arrives in one mailbox. */
+export async function registerMailboxPush(
+  mailboxId: string,
+  subscription: PushSubscriptionJson,
+): Promise<void> {
+  await unwrap(
+    await fetch(`/api/mailbox/${mailboxId}/push`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ subscription }),
+    }),
+  );
 }

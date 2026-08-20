@@ -1,12 +1,19 @@
 <script lang="ts">
-  import { listGames } from '$lib/db/store.ts';
-  import type { GameRecord } from '$lib/db/schema.ts';
+  import { goto } from '$app/navigation';
+
+  import { listContacts, listGames } from '$lib/db/store.ts';
+  import type { GameRecord, InboxRecord } from '$lib/db/schema.ts';
   import { cancelPendingGame, refreshPendingGame } from '$lib/games.ts';
   import { groupGames, type Group } from '$lib/game-list.ts';
+  import { acceptInvite, declineInvite, inbox, pollInbox } from '$lib/mailbox.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
+  import { titleOf } from '$lib/registry.ts';
 
   let groups = $state<Group[]>([]);
+  let invitations = $state<InboxRecord[]>([]);
+  let names = $state<Record<string, string>>({});
+  let acting = $state<string | null>(null);
   let loaded = $state(false);
   let showFinished = $state(false);
   let failure = $state<string | null>(null);
@@ -28,6 +35,36 @@
 
     groups = await groupGames(games);
     loaded = true;
+
+    names = Object.fromEntries(
+      (await listContacts()).map((contact) => [contact.publicKey, contact.name]),
+    );
+
+    // What is already on this device first, so the list is right immediately;
+    // then ask the relay, which is a network round trip nobody should wait on.
+    invitations = await inbox();
+    await pollInbox().catch(() => []);
+    invitations = await inbox();
+  }
+
+  async function accept(item: InboxRecord) {
+    acting = item.messageId;
+    failure = null;
+    try {
+      const result = await acceptInvite(item.messageId);
+      if (result.ok) await goto(`/g/${encodeURIComponent(result.game.gameId)}`);
+      else {
+        failure = 'That invitation could not be opened. It may already have been taken back.';
+        await refresh();
+      }
+    } finally {
+      acting = null;
+    }
+  }
+
+  async function decline(item: InboxRecord) {
+    await declineInvite(item.messageId);
+    await refresh();
   }
 
   $effect(() => {
@@ -60,7 +97,7 @@
 
   const finished = $derived(groups.find((group) => group.key === 'finished'));
   const active = $derived(groups.filter((group) => group.key !== 'finished'));
-  const empty = $derived(loaded && groups.length === 0);
+  const empty = $derived(loaded && groups.length === 0 && invitations.length === 0);
 </script>
 
 {#if failure}
@@ -69,6 +106,33 @@
 
 <div class="stack">
   <a class="primary start" href="/new">Start a new game</a>
+
+  {#if invitations.length > 0}
+    <section>
+      <h2 class="group">
+        <span>Invitations</span>
+        <span class="count">{invitations.length}</span>
+      </h2>
+      <ul>
+        {#each invitations as item (item.messageId)}
+          <li class="card invite" data-invitation={item.messageId}>
+            <span class="line">
+              <span class="title">
+                {titleOf(item.pluginId)} with {names[item.fromPubKey] ?? 'someone you have played'}
+              </span>
+            </span>
+            <span class="muted detail">They started a game and are waiting for you.</span>
+            <span class="row">
+              <button class="primary" onclick={() => accept(item)} disabled={acting !== null}>
+                {acting === item.messageId ? 'Opening…' : 'Play'}
+              </button>
+              <button onclick={() => decline(item)} disabled={acting !== null}>No thanks</button>
+            </span>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
 
   {#if empty}
     <div class="card">
@@ -207,6 +271,11 @@
 
   .detail {
     font-size: 0.9rem;
+  }
+
+  .invite {
+    display: grid;
+    gap: 0.4rem;
   }
 
   .past {
