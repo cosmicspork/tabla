@@ -214,8 +214,13 @@ test('the list sorts by who has to act next', async ({ browser }) => {
   await expect(b.getByText('Waiting on them')).toBeVisible();
 
   // Alice moves, and her own list flips as soon as she comes back to it.
+  //
+  // Waiting for the board to say so first is not politeness: the record the
+  // list reads is written during the same render, just before it, so leaving
+  // for the list too early races the write on a slow machine.
   await a.goBack();
   await a.locator('.board button').first().click();
+  await expect(a.getByText('Waiting for your opponent.')).toBeVisible();
   await a.goto('/');
   await expect(a.getByText('Waiting on them')).toBeVisible();
   await expect(a.getByText('Your move')).toBeHidden();
