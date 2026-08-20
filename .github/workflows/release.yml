@@ -3,9 +3,15 @@ name: release
 on:
   push:
     branches: [main]
-  # Manual redeploy from current main, for when a deploy failed on a release and
-  # re-running the original would only replay the same broken snapshot.
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: >-
+          Also deploy current main to Cloudflare. For when a deploy failed on a
+          release and re-running the original would only replay the same broken
+          snapshot.
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -69,9 +75,13 @@ jobs:
   # Runs in the same workflow run as the release, which is what lets it see a
   # release that release-please just cut — a separate workflow would not, since
   # GITHUB_TOKEN pushes trigger nothing.
+  #
+  # A dispatch does not deploy unless it was asked to. Nudging release-please —
+  # the ordinary reason to run this by hand — is otherwise indistinguishable
+  # from forcing a release out, and the two want very different amounts of care.
   deploy:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.release-please.outputs.release_created == 'true' || inputs.deploy }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
