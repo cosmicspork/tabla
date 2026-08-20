@@ -7,7 +7,10 @@
    */
   import { goto } from '$app/navigation';
 
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
+
   import { joinGame } from '$lib/games.ts';
+  import { pageTitle } from '$lib/page-title.svelte.ts';
 
   let phase = $state<'working' | 'failed'>('working');
   let reason = $state<string>('');
@@ -20,6 +23,10 @@
     incompatible:
       'This game was made with a different version of tabla, so the rules would not match. Update and ask for a new invite.',
   };
+
+  $effect(() => {
+    pageTitle.text = 'Invitation';
+  });
 
   $effect(() => {
     void redeem();
@@ -39,10 +46,9 @@
 </script>
 
 {#if phase === 'working'}
-  <h1>Joining…</h1>
+  <StatusBanner text="Joining…" spinner />
   <p class="muted">Unlocking the invite on your device.</p>
 {:else}
-  <h1>Could not join</h1>
-  <p class="notice warn">{reason}</p>
-  <a href="/">Back to your games</a>
+  <StatusBanner text="Could not join" tone="warn" />
+  <p class="muted">{reason}</p>
 {/if}

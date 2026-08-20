@@ -31,7 +31,7 @@ function watchDownloads(page: Page): string[] {
 async function openWordGame(page: Page) {
   await page.goto('/');
   await startGame(page, 'letras');
-  await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(page.getByTestId('status')).toContainText('Waiting for someone');
   return inviteLink(page);
 }
 
@@ -117,7 +117,7 @@ test('the bundled game plays with nothing downloaded at all', async ({ browser }
 
   await a.goto('/');
   await startGame(a, 'tictactoe');
-  await expect(a.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
   const link = await inviteLink(a);
 
   const two = await browser.newContext();

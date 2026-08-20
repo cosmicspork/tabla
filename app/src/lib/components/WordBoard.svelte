@@ -4,9 +4,11 @@
   let {
     board,
     onplay,
+    onresign,
   }: {
     board: BoardState;
     onplay: (move: unknown) => void;
+    onresign?: () => void;
   } = $props();
 
   const SIZE = 15;
@@ -280,13 +282,6 @@
         {#if tile !== '?'}<span class="pip">{valueOf(tile)}</span>{/if}
       </button>
     {/each}
-    <span class="muted opponent">
-      {#if rack.length < 7 && !yourTurn && phase === 'play'}
-        You draw when they move
-      {:else}
-        {opponentTiles} on their rack
-      {/if}
-    </span>
   </div>
 
   {#if exchanging}
@@ -308,8 +303,19 @@
         Swap
       </button>
       <button onclick={pass} disabled={!yourTurn || phase !== 'play' || busy}>Pass</button>
+      {#if onresign && !board.outcome}
+        <button class="danger resign" onclick={onresign}>Resign</button>
+      {/if}
     </div>
   {/if}
+
+  <p class="muted opponent">
+    {#if rack.length < 7 && !yourTurn && phase === 'play'}
+      You draw when they move
+    {:else}
+      {opponentTiles} on their rack
+    {/if}
+  </p>
 
   {#if lastPlay}
     <p class="muted last">
@@ -447,10 +453,15 @@
     opacity: 0.7;
   }
 
+  /* The rack is the one thing on this screen a player reaches for without
+     looking, so it sits centred under the board at full width rather than
+     tucked against the left edge beside a status line. */
   .rack {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    justify-content: center;
+    width: 100%;
+    gap: 0.4rem;
     flex-wrap: wrap;
   }
 
@@ -483,14 +494,30 @@
   }
 
   .opponent {
-    margin-left: auto;
+    text-align: center;
     font-size: 0.85rem;
+    margin: -0.25rem 0 0;
   }
 
   .actions {
     display: flex;
     gap: 0.5rem;
     flex-wrap: wrap;
+  }
+
+  .actions > button {
+    /* Sized to their labels, so all five fit on one line where there is room
+       rather than pushing the last one onto a row of its own. */
+    flex: 0 1 auto;
+  }
+
+  /* Resigning is not one of the moves, so it sits apart from them — at the far
+     end of the row, and quieter than the buttons that take a turn. */
+  .resign {
+    margin-left: auto;
+    background: none;
+    border-color: transparent;
+    padding-inline: 0.4rem;
   }
 
   .challenge {

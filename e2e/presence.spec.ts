@@ -10,7 +10,7 @@ import { expect, test } from '@playwright/test';
 
 import { inviteLink, startGame } from './helpers.ts';
 
-const HERE = 'Your opponent is here.';
+const HERE = 'They are here';
 
 test('each player is told when the other is on the board, and when they go', async ({
   browser,
@@ -20,7 +20,7 @@ test('each player is told when the other is on the board, and when they go', asy
 
   await a.goto('/');
   await startGame(a, 'tictactoe');
-  await expect(a.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
   const link = await inviteLink(a);
 
   const two = await browser.newContext();
@@ -28,7 +28,7 @@ test('each player is told when the other is on the board, and when they go', asy
   await b.goto(link);
 
   // Both boards are up, so both sockets are open and each should say so.
-  await expect(a.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 30_000 });
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 30_000 });
   await expect(a.getByText(HERE)).toBeVisible({ timeout: 30_000 });
   await expect(b.getByText(HERE)).toBeVisible({ timeout: 30_000 });
 
@@ -47,13 +47,16 @@ test('a player alone in a game is not told anyone is there', async ({ browser })
 
   await a.goto('/');
   await startGame(a, 'tictactoe');
-  await expect(a.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
   const link = await inviteLink(a);
 
   const two = await browser.newContext();
   const b = await two.newPage();
   await b.goto(link);
-  await expect(a.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 30_000 });
+  // Wait for the board rather than the header: the header names the game as
+  // soon as the invite exists, so it would not prove the claim has landed —
+  // and closing the second page too early leaves the opening entry unwritten.
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 30_000 });
   await b.close();
 
   // Reloading with nobody else connected must not resurrect the indicator from

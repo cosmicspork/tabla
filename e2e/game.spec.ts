@@ -20,7 +20,7 @@ async function newPlayer(context: BrowserContext): Promise<Page> {
 async function readInviteLink(page: Page): Promise<string> {
   // The share button copies it, but reading the rendered link is less flaky
   // than depending on clipboard permissions.
-  await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(page.getByTestId('status')).toContainText('Waiting for someone');
 
   return page.evaluate(() => {
     const game = location.pathname.split('/').pop() ?? '';
@@ -49,7 +49,7 @@ test('two players complete a game through the relay', async ({ browser }) => {
   await expect(b.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible();
 
   // Alice's page notices the claim on its own and moves to the board.
-  await expect(a.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 20_000 });
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
 
   // Alice is X and moves first.
   await expect(a.getByText('Your turn.')).toBeVisible();
@@ -94,7 +94,7 @@ test('an invite link can only be used once', async ({ browser }) => {
   // Carol tries the same link. It is a bearer token, and it is spent.
   const c = await newPlayer(carol);
   await c.goto(link);
-  await expect(c.getByRole('heading', { name: 'Could not join' })).toBeVisible();
+  await expect(c.getByTestId('status')).toContainText('Could not join');
   await expect(c.getByText(/already been used/)).toBeVisible();
 
   await alice.close();
@@ -133,4 +133,50 @@ test('a game survives the relay losing its copy', async ({ browser, request }) =
 
   await alice.close();
   await bob.close();
+});
+
+test('resigning is reported as resigning, to both players', async ({ browser }) => {
+  const alice = await browser.newContext();
+  const bob = await browser.newContext();
+
+  const a = await newPlayer(alice);
+  const b = await newPlayer(bob);
+
+  await startGame(a);
+  const link = await readInviteLink(a);
+  await b.goto(link);
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  // The confirmation is the whole point of an irreversible control.
+  a.on('dialog', (dialog) => dialog.accept());
+  await a.getByRole('button', { name: 'Resign' }).click();
+
+  // A resignation is a win for somebody, but neither player is told they
+  // played it out.
+  await expect(a.getByTestId('status')).toContainText('You resigned.');
+  await expect(b.getByTestId('status')).toContainText('They resigned.', { timeout: 20_000 });
+
+  // And the game list agrees with the board.
+  await a.goto('/');
+  await expect(a.getByText('You resigned')).toBeVisible();
+
+  await alice.close();
+  await bob.close();
+});
+
+test('an invite nobody took can be called off', async ({ browser }) => {
+  const alice = await browser.newContext();
+  const a = await newPlayer(alice);
+
+  await startGame(a);
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+
+  a.on('dialog', (dialog) => dialog.accept());
+  await a.getByRole('button', { name: 'Cancel invite' }).click();
+
+  // Back on the list, with nothing left behind.
+  await expect(a.getByRole('heading', { name: 'Your games' })).toBeVisible();
+  await expect(a.getByText('Waiting for someone to join')).toBeHidden();
+
+  await alice.close();
 });

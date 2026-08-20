@@ -16,10 +16,19 @@ import type { Component } from 'svelte';
 
 import type { BoardState } from './game-session.ts';
 
-/** Every board takes the same two props; what a move *is* varies by game. */
+/** Every board takes the same props; what a move *is* varies by game. */
 export type BoardProps = {
   board: BoardState;
   onplay: (move: unknown) => void;
+  /**
+   * Give up.
+   *
+   * Offered to every board, taken up by the ones that have somewhere sensible
+   * to put it — a game with a row of actions should keep resigning among them
+   * rather than stranded under the board. Boards that ignore it get the page's
+   * own button instead; see `resignInBoard`.
+   */
+  onresign?: () => void;
 };
 
 /**
@@ -55,6 +64,14 @@ export interface GameEntry {
   distribution: Distribution;
   /** The hash of the reference data this game reads, if it reads any. */
   dictionary?: string;
+  /**
+   * Whether this game's board renders its own resign control.
+   *
+   * The page cannot ask a component which props it uses, so the registry says.
+   * A board with an action row wants resigning in it; a bare grid does not, and
+   * the page keeps the button for those.
+   */
+  resignInBoard?: boolean;
   /** Loaded on demand: a board is a page's worth of code we need only if used. */
   board: () => Promise<{ default: Component<BoardProps> }>;
 }
@@ -76,6 +93,7 @@ const REGISTRY: GameEntry[] = [
     blurb: 'Words on a board, a turn at a time. Downloads once, then plays offline.',
     seed: 'deal',
     distribution: 'downloadable',
+    resignInBoard: true,
     dictionary: DICTIONARY_EN_V1.sha256,
     board: () => import('./components/WordBoard.svelte'),
   },
@@ -89,6 +107,7 @@ const REGISTRY: GameEntry[] = [
     blurb: 'Words on a board, a turn at a time.',
     seed: 'draw',
     distribution: 'downloadable',
+    resignInBoard: true,
     dictionary: DICTIONARY_EN_V1.sha256,
     board: () => import('./components/WordBoard.svelte'),
   },

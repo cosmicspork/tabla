@@ -41,10 +41,17 @@ export async function updateGame(
   return updated;
 }
 
+/**
+ * Forgets a game entirely: the record, its log, and its deal.
+ *
+ * All three in one transaction, because a log without its game record is
+ * unreachable and a deal snapshot without its log is a snapshot of nothing.
+ */
 export async function deleteGame(gameId: string): Promise<void> {
   const database = await db();
-  const tx = database.transaction(['games', 'entries'], 'readwrite');
+  const tx = database.transaction(['games', 'entries', 'deals'], 'readwrite');
   await tx.objectStore('games').delete(gameId);
+  await tx.objectStore('deals').delete(gameId);
 
   const entries = tx.objectStore('entries').index('byGame');
   for await (const cursor of entries.iterate(gameId)) await cursor.delete();

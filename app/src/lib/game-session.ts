@@ -46,6 +46,14 @@ export interface BoardState {
    * to sit and wait for their move.
    */
   opponentPresent: boolean;
+  /**
+   * Who gave up, if anyone.
+   *
+   * Carried separately from `outcome` because a resignation and a defeat are
+   * the same result and a different event, and a game list that calls them both
+   * "You lost" is telling you less than it knows.
+   */
+  resignedBy?: number;
 }
 
 export class GameSession {
@@ -483,6 +491,7 @@ export class GameSession {
       ready: true,
       view,
       outcome: finalOutcome,
+      resignedBy,
       player: this.player,
       pending: this.engine?.pendingCount ?? 0,
       status: this.syncStatus,
@@ -530,7 +539,7 @@ export class GameSession {
       this.game =
         (await updateGame(this.game.gameId, {
           status: 'finished',
-          outcome: describeOutcome(board.outcome, this.player),
+          outcome: describeOutcome(board.outcome, this.player, board.resignedBy),
         })) ?? this.game;
     }
 
@@ -588,7 +597,18 @@ function opened(action: unknown, ending: number[]): number[] {
   return ending;
 }
 
-export function describeOutcome(outcome: PluginOutcome, player: number): string {
+/**
+ * How a finished game is described in the list.
+ *
+ * A resignation is a win for somebody, but calling it that reads as though the
+ * game was played out. Both players are told the same thing about it.
+ */
+export function describeOutcome(
+  outcome: PluginOutcome,
+  player: number,
+  resignedBy?: number,
+): string {
+  if (resignedBy !== undefined) return resignedBy === player ? 'You resigned' : 'They resigned';
   if (outcome.kind === 'draw') return 'Draw';
   return outcome.player === player ? 'You won' : 'You lost';
 }

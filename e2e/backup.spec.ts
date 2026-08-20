@@ -20,7 +20,7 @@ async function newPlayer(context: BrowserContext): Promise<Page> {
 }
 
 async function inviteLink(page: Page): Promise<string> {
-  await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(page.getByTestId('status')).toContainText('Waiting for someone');
   return page.evaluate(
     () => document.querySelector<HTMLElement>('[data-invite-link]')?.dataset.inviteLink ?? '',
   );

@@ -9,12 +9,12 @@ import {
   toBase64Url,
 } from '@tabla/shared';
 
-import { getGame, putGame, rememberContact, updateGame } from './db/store.ts';
+import { deleteGame, getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { requestPersistentStorage } from './lifecycle.ts';
 import { gameEntry, latestGame } from './registry.ts';
-import { claimInvite, createInvite, inviteStatus } from './relay.ts';
+import { claimInvite, createInvite, inviteStatus, RelayError } from './relay.ts';
 
 export interface CreatedInvite {
   game: GameRecord;
@@ -69,12 +69,13 @@ export async function createGame(
     BigInt(now),
   );
 
-  const { blobId } = await createInvite(toBase64Url(blob));
+  const { blobId, expiresAt } = await createInvite(toBase64Url(blob));
 
   const game: GameRecord = {
     gameId: toBase64Url(gameId),
     blobId,
     blobKey: toBase64Url(blobKey),
+    expiresAt,
     pluginId: entry.id,
     pluginVersion: entry.version,
     dictionary: entry.dictionary,
@@ -201,7 +202,19 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
   const game = await getGame(gameId);
   if (!game || game.status !== 'pending') return game;
 
-  const status = await inviteStatus(game.blobId);
+  // An invite the relay has dropped is gone for good: the seven-day alarm has
+  // fired, and nobody can redeem the link any more. Saying so is better than
+  // leaving the row waiting forever for a claim that cannot arrive.
+  let status;
+  try {
+    status = await inviteStatus(game.blobId);
+  } catch (error) {
+    if (error instanceof RelayError && error.status === 404) {
+      return updateGame(gameId, { status: 'expired', blobKey: undefined });
+    }
+    throw error;
+  }
+
   if (!status.claimed || !status.claimerPubKey || !status.sig) return game;
 
   const { core } = await loadIdentity();
@@ -222,6 +235,25 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
     blobKey: undefined,
     lastActivity: now,
   });
+}
+
+/**
+ * Calls off an invite nobody took.
+ *
+ * Only the local half for now: the record and its log go, so the game stops
+ * occupying the list. The blob stays on the relay until its seven-day alarm
+ * fires — the relay has never seen the initiator's key, so it has no way to
+ * tell a cancellation from anyone else asking, and the endpoint that fixes
+ * that comes with the cancel token.
+ */
+export async function cancelPendingGame(gameId: string): Promise<void> {
+  const game = await getGame(gameId);
+  if (!game) return;
+  if (game.status === 'active' || game.status === 'finished') {
+    throw new Error('That game has already started. Resign it instead.');
+  }
+
+  await deleteGame(gameId);
 }
 
 function fromHex(hex: string): Uint8Array {
