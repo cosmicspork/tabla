@@ -33,4 +33,9 @@ js-sys = "0.3"
 # checked against the signed manifest on first use.
 default = ["tictactoe"]
 tictactoe = ["dep:tabla-tictactoe"]
-letras = ["dep:tabla-letras"]
+# One feature per shipped version of the word game, because a version is a
+# different set of rules rather than a setting. `letras-v1` exists only to keep
+# building the artifact games in progress are already using; it is committed and
+# hash-pinned, so in practice it is never rebuilt.
+letras-v1 = ["dep:tabla-letras"]
+letras-v2 = ["dep:tabla-letras"]

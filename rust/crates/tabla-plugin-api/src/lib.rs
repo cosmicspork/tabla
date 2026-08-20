@@ -83,7 +83,8 @@ impl core::error::Error for PluginError {}
 /// same outputs on every device and every build, because both clients replay the
 /// same log independently and any divergence is an unrecoverable desync. That
 /// rules out wall-clock time, ambient randomness, and iteration over unordered
-/// collections. Any randomness a game needs comes from `seed`.
+/// collections. Anything a game cannot derive from the log comes in through
+/// `private`.
 ///
 /// # Assets
 ///
@@ -110,10 +111,16 @@ pub trait GamePlugin {
 
     /// Builds the starting state.
     ///
-    /// `seed` is this player's entropy for the game. Tic tac toe ignores it;
-    /// games with hidden state use it to derive their private draws so that the
-    /// result is fixed in advance and can be audited afterwards.
-    fn setup(config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<Self::State, PluginError>;
+    /// `private` is what this device knows that the log does not say out loud:
+    /// entropy for a game that derives its own draws, or the tile values a
+    /// dealing protocol has opened to this player and nobody else. Tic tac toe
+    /// ignores it, having nothing hidden.
+    ///
+    /// It is **private, not trusted**. Nothing a plugin reads here is evidence
+    /// of anything — the host verified it before handing it over, exactly as
+    /// the log layer verified the signatures on the moves. A plugin's job is to
+    /// apply rules to facts, not to establish them.
+    fn setup(config: &[u8], private: &[u8], assets: &[u8]) -> Result<Self::State, PluginError>;
 
     /// Checks a move without applying it.
     fn validate_move(
@@ -148,7 +155,7 @@ pub trait BytePlugin {
     fn id(&self) -> &'static str;
     fn version(&self) -> u32;
 
-    fn setup(&self, config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<Vec<u8>, PluginError>;
+    fn setup(&self, config: &[u8], private: &[u8], assets: &[u8]) -> Result<Vec<u8>, PluginError>;
     fn validate_move(
         &self,
         state: &[u8],
@@ -168,7 +175,7 @@ pub trait BytePlugin {
     fn replay(
         &self,
         config: &[u8],
-        seed: &[u8; 32],
+        private: &[u8],
         moves: &[Vec<u8>],
         assets: &[u8],
     ) -> Result<Vec<u8>, PluginError>;
@@ -218,8 +225,8 @@ impl<P: GamePlugin> BytePlugin for Adapter<P> {
         P::VERSION
     }
 
-    fn setup(&self, config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<Vec<u8>, PluginError> {
-        encode(&P::setup(config, seed, assets)?, PluginError::BadState)
+    fn setup(&self, config: &[u8], private: &[u8], assets: &[u8]) -> Result<Vec<u8>, PluginError> {
+        encode(&P::setup(config, private, assets)?, PluginError::BadState)
     }
 
     fn validate_move(
@@ -253,11 +260,11 @@ impl<P: GamePlugin> BytePlugin for Adapter<P> {
     fn replay(
         &self,
         config: &[u8],
-        seed: &[u8; 32],
+        private: &[u8],
         moves: &[Vec<u8>],
         assets: &[u8],
     ) -> Result<Vec<u8>, PluginError> {
-        let mut state = P::setup(config, seed, assets)?;
+        let mut state = P::setup(config, private, assets)?;
 
         for (i, raw) in moves.iter().enumerate() {
             if P::is_game_over(&state).is_some() {

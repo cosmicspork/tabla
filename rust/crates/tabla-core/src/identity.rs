@@ -15,6 +15,12 @@ use crate::{GAME_ID_LEN, HASH_LEN, PUBKEY_LEN, SEED_LEN, SIG_LEN};
 /// Domain tag separating draw entropy from every other use of the identity key.
 pub const DRAW_SEED_DOMAIN: &[u8] = b"tabla/draw-seed/v1";
 
+/// Domain tag for a game's share of the key the deck is encrypted under.
+pub const DEAL_SECRET_DOMAIN: &[u8] = b"tabla/deal-share/v1";
+
+/// Length of the key material a deal share is reduced from.
+pub const DEAL_SECRET_LEN: usize = 64;
+
 /// An installation's identity keypair.
 ///
 /// The seed is held in memory as raw bytes because the export format has to be
@@ -81,6 +87,27 @@ impl Identity {
         let mut okm = [0u8; SEED_LEN];
         hk.expand(game_id, &mut okm)
             .expect("32 bytes is a valid HKDF-SHA256 output length");
+        okm
+    }
+
+    /// This device's half of the key one game's deck is encrypted under.
+    ///
+    /// Derived for the same reason [`Identity::draw_seed`] is: a restored
+    /// backup must be able to read a rack it was dealt before the backup was
+    /// taken, and a secret that only existed in IndexedDB could not survive
+    /// that. Nothing extra to export, nothing extra to lose.
+    ///
+    /// Unlike the draw seed, this one is **never published**. Revealing it
+    /// would hand the opponent every tile still in the bag. Its public half is
+    /// what goes in the log, with a proof of knowledge attached.
+    ///
+    /// Sixty-four bytes because the caller reduces them into a scalar, and a
+    /// wide reduction is what makes that uniform.
+    pub fn deal_secret(&self, game_id: &[u8; GAME_ID_LEN]) -> [u8; DEAL_SECRET_LEN] {
+        let hk = Hkdf::<Sha256>::new(Some(DEAL_SECRET_DOMAIN), &self.seed());
+        let mut okm = [0u8; DEAL_SECRET_LEN];
+        hk.expand(game_id, &mut okm)
+            .expect("64 bytes is a valid HKDF-SHA256 output length");
         okm
     }
 }

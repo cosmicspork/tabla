@@ -24,7 +24,7 @@ import {
 export type AssetSource = (hash: string) => Promise<Uint8Array>;
 
 /** The same arrangement for a game's rules, which are also fetched and checked. */
-export type ModuleSource = (pluginId: string) => Promise<Uint8Array>;
+export type ModuleSource = (pluginId: string, pluginVersion: number) => Promise<Uint8Array>;
 
 /**
  * `Omit` over a union keeps only the keys every member shares, which would drop
@@ -142,13 +142,14 @@ export class PluginHost {
       try {
         return await this.post(request);
       } catch (error) {
-        const pluginId = 'pluginId' in request ? request.pluginId : undefined;
+        const named = 'pluginId' in request ? request : undefined;
         const hash = 'assetHash' in request ? request.assetHash : undefined;
 
-        if (isMissing(error, MODULE_MISSING) && !suppliedModule && pluginId && this.moduleSource) {
+        if (isMissing(error, MODULE_MISSING) && !suppliedModule && named && this.moduleSource) {
           suppliedModule = true;
-          const bytes = await this.moduleSource(pluginId);
-          await this.post({ op: 'provideModule', pluginId, bytes });
+          const { pluginId, pluginVersion } = named;
+          const bytes = await this.moduleSource(pluginId, pluginVersion);
+          await this.post({ op: 'provideModule', pluginId, pluginVersion, bytes });
           continue;
         }
 
@@ -169,9 +170,21 @@ export class PluginHost {
     return result?.kind === 'strings' ? result.value : [];
   }
 
-  async pluginVersion(pluginId: string): Promise<number> {
-    const result = await this.call({ op: 'pluginVersion', pluginId });
+  async pluginVersion(pluginId: string, pluginVersion: number): Promise<number> {
+    const result = await this.call({ op: 'pluginVersion', pluginId, pluginVersion });
     if (result?.kind !== 'number') throw new Error('unexpected plugin response');
+    return result.value;
+  }
+
+  /**
+   * The deck this game is dealt from, in canonical order.
+   *
+   * Public information, and the same on both devices — which is why setting up
+   * a deal costs no log entries. Empty for a game that hides nothing.
+   */
+  async deck(pluginId: string, pluginVersion: number): Promise<Uint8Array> {
+    const result = await this.call({ op: 'deck', pluginId, pluginVersion });
+    if (result?.kind !== 'bytes') throw new Error('unexpected plugin response');
     return result.value;
   }
 
@@ -182,19 +195,34 @@ export class PluginHost {
    * those bytes get signed into the log and an encoding mismatch would be
    * unrecoverable.
    */
-  async encodeMove(pluginId: string, move: unknown): Promise<Uint8Array> {
+  async encodeMove(pluginId: string, pluginVersion: number, move: unknown): Promise<Uint8Array> {
     const result = await this.call({
       op: 'encodeMove',
       pluginId,
+      pluginVersion,
       json: JSON.stringify(move),
     });
     if (result?.kind !== 'bytes') throw new Error('unexpected plugin response');
     return result.value;
   }
 
+  /**
+   * Renders an encoded move back as JSON.
+   *
+   * The host needs this to find the deal payload an entry carried: the bytes
+   * are the plugin's format, and reading them anywhere else would be a second
+   * decoder to keep in step with the first.
+   */
+  async decodeMove(pluginId: string, pluginVersion: number, move: Uint8Array): Promise<string> {
+    const result = await this.call({ op: 'decodeMove', pluginId, pluginVersion, move });
+    if (result?.kind !== 'string') throw new Error('unexpected plugin response');
+    return result.value;
+  }
+
   /** Replays the move list and renders it from one player's point of view. */
   async view(options: {
     pluginId: string;
+    pluginVersion: number;
     config: Uint8Array;
     seed: Uint8Array;
     moves: Uint8Array[];
@@ -209,6 +237,7 @@ export class PluginHost {
   /** Checks a move before it is signed, so illegal moves never enter the log. */
   async validate(options: {
     pluginId: string;
+    pluginVersion: number;
     config: Uint8Array;
     seed: Uint8Array;
     moves: Uint8Array[];

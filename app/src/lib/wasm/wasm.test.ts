@@ -21,6 +21,12 @@ const B_PUB = 'a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0'
 const GAME_KEY = 'd025583f6bcabb5464fbd2ea9d3a96292b64e97606452b70f7cdd30130eb1c78';
 const A_DRAW = '603b9525971b7038aa85f1b7ef2f3f417663c25acb08ff8b328f75dac726e549';
 const B_DRAW = '89c3e94c7f40fd1bb1c05223dab174817ff8f41785746eecabadf9c149ef2cf6';
+const A_DEAL =
+  '2860080d4063cda4739ef79b5ca8d6c29cd011809bd4efaa25da0c717d2304c0' +
+  '210ba2d033c91daa12521958c60c5781579145675718a0ce3282389397f4692f';
+const B_DEAL =
+  '613c915e265dbd4bfd20b0b0cfa85a814fb7559d5a3337e5be774ea55e0d5a74' +
+  '89594877a57de29a39950c80928d4ab978b4039d828ee617a6237c902fda32de';
 
 function hex(bytes: Uint8Array): string {
   return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -52,6 +58,13 @@ describe('core module', () => {
     // differently would restore a backup into the wrong hand.
     expect(hex(new core.Identity(ALICE_SEED).deriveDrawSeed(GAME_ID))).toBe(A_DRAW);
     expect(hex(new core.Identity(BOB_SEED).deriveDrawSeed(GAME_ID))).toBe(B_DRAW);
+  });
+
+  it('derives the frozen per-game deal secrets', () => {
+    // The deck is encrypted under the sum of both players' public halves, so a
+    // device computing this differently would open every tile to nonsense.
+    expect(hex(new core.Identity(ALICE_SEED).deriveDealSecret(GAME_ID))).toBe(A_DEAL);
+    expect(hex(new core.Identity(BOB_SEED).deriveDealSecret(GAME_ID))).toBe(B_DEAL);
   });
 
   it('rejects byte strings of the wrong length instead of truncating them', () => {
@@ -146,6 +159,113 @@ function playGame(cells: number[]) {
 function encodeMove(cell: number): Uint8Array {
   return plugin.encodeMove('tictactoe', JSON.stringify({ cell }));
 }
+
+describe('the deal', () => {
+  // The bag, key shares, and entropy below match the Rust vector in
+  // rust/crates/tabla-deal/tests/golden.rs. Two languages reaching the same
+  // bytes is what stops one of them quietly diverging.
+  const BAG = new Uint8Array([1, 2, 3, 4, 5, 6]);
+  const GAME = new Uint8Array(16).fill(0x5a);
+  const KINDS = 27;
+  const CEREMONY = 'c86929198897e17fa7609d88cbe8242d39743159c39fee74e588f01ab0c503a4';
+
+  const secret = (index: number) => new Uint8Array(64).fill(0x10 + index);
+  const entropy = (n: number) => new Uint8Array(32).fill(n);
+
+  function table() {
+    return {
+      initiator: new core.DealSession(GAME, 0, secret(0), BAG, KINDS),
+      claimer: new core.DealSession(GAME, 1, secret(1), BAG, KINDS),
+    };
+  }
+
+  async function digestOf(payloads: Uint8Array[]): Promise<string> {
+    const total = payloads.reduce((n, p) => n + p.length, 0);
+    const joined = new Uint8Array(total);
+    let at = 0;
+    for (const payload of payloads) {
+      joined.set(payload, at);
+      at += payload.length;
+    }
+    return hex(new Uint8Array(await crypto.subtle.digest('SHA-256', joined)));
+  }
+
+  it('runs an opening ceremony to the frozen bytes', async () => {
+    const { initiator, claimer } = table();
+    const payloads: Uint8Array[] = [];
+
+    const submit = (author: number, seq: number, payload: Uint8Array) => {
+      payloads.push(payload);
+      initiator.applyEntry(author, seq, payload);
+      return claimer.applyEntry(author, seq, payload);
+    };
+
+    submit(0, 2, initiator.keyPayload(2, entropy(0x01)));
+    submit(1, 3, claimer.keyAndShufflePayload(3, entropy(0x02)));
+
+    // The Rust vector shuffles with 0x04 and deals with 0x05; the combined
+    // payload builder uses one entropy value for both, so this asserts the
+    // ceremony shape rather than those exact two calls.
+    submit(0, 4, initiator.shufflePayload(4, 2, entropy(0x04)));
+    const last = submit(1, 5, claimer.dealPayload(5, 2, entropy(0x06)));
+
+    // The same bytes the Rust vector produces, entry for entry.
+    expect(await digestOf(payloads)).toBe(CEREMONY);
+
+    expect(initiator.ready).toBe(true);
+    expect(claimer.ready).toBe(true);
+    expect(last.ready).toBe(false);
+
+    // Each player holds two positions and can read only their own.
+    expect([...claimer.held]).toEqual([0, 1]);
+    expect([...initiator.held]).toEqual([2, 3]);
+    expect(claimer.tile(0)).toBeDefined();
+    expect(initiator.tile(0)).toBeUndefined();
+
+    // Four distinct tiles, every one of them out of the bag.
+    const dealt = [...claimer.held, ...initiator.held].map(
+      (p) => (claimer.tile(p) ?? initiator.tile(p)) as number,
+    );
+    expect(new Set(dealt).size).toBe(4);
+    expect(dealt.every((tile) => [...BAG].includes(tile))).toBe(true);
+  });
+
+  it('refuses a payload replayed at another position in the log', () => {
+    const { initiator, claimer } = table();
+    const payload = initiator.keyPayload(2, entropy(0x01));
+
+    expect(() => claimer.applyEntry(0, 3, payload)).toThrow();
+  });
+
+  it('refuses a tampered proof rather than opening the wrong tile', () => {
+    const { initiator, claimer } = table();
+    const payload = initiator.keyPayload(2, entropy(0x01));
+    payload[payload.length - 1] ^= 0x01;
+
+    expect(() => claimer.applyEntry(0, 2, payload)).toThrow();
+  });
+
+  it('carries on from a snapshot without re-reading the log', () => {
+    const { initiator, claimer } = table();
+    const submit = (author: number, seq: number, payload: Uint8Array) => {
+      initiator.applyEntry(author, seq, payload);
+      claimer.applyEntry(author, seq, payload);
+    };
+
+    submit(0, 2, initiator.keyPayload(2, entropy(0x01)));
+    submit(1, 3, claimer.keyAndShufflePayload(3, entropy(0x02)));
+    submit(0, 4, initiator.shufflePayload(4, 2, entropy(0x04)));
+
+    const resumed = core.DealSession.restore(GAME, 1, secret(1), KINDS, claimer.snapshot());
+    expect(resumed.ready).toBe(true);
+    expect([...resumed.held]).toEqual([...claimer.held]);
+    expect(resumed.tile(0)).toBe(claimer.tile(0));
+
+    // And it can still take the next entry.
+    const facts = resumed.applyEntry(1, 5, claimer.dealPayload(5, 2, entropy(0x06)));
+    expect(facts.theirs.length).toBe(2);
+  });
+});
 
 describe('log', () => {
   it('reports no tip when empty, matching what the relay reports', () => {

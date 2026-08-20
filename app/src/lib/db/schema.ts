@@ -8,7 +8,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 export const DB_NAME = 'tabla';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 /** Which side of the invite we were on. Decides who moves first. */
 export type Role = 'initiator' | 'claimer';
@@ -78,7 +78,13 @@ export interface EntryRecord {
 export interface BlobRecord {
   /** Hex SHA-256 of `bytes`, checked before this row was ever written. */
   sha256: string;
-  /** Which plugin's manifest entry brought it in, for removal and totals. */
+  /**
+   * Which manifest entry brought it in, as `id@version`.
+   *
+   * Versioned because two versions of one game are separate downloads that may
+   * share reference data — the word list is the same bytes under both — and
+   * removing one must not take the other's data with it.
+   */
   pluginId: string;
   kind: 'module' | 'asset';
   bytes: Uint8Array;
@@ -91,6 +97,22 @@ export interface ContactRecord {
   name: string;
   firstSeen: number;
   lastPlayed: number;
+}
+
+/**
+ * A verified deal, written down so reopening a game need not re-verify its log.
+ *
+ * Only meaningful against the log it was taken from, which is why the tip it
+ * belongs to is stored beside it. A mismatch is not an error — it just costs a
+ * re-verify, which is the correct price for a log that has changed underneath.
+ */
+export interface DealRecord {
+  gameId: string;
+  /** The highest sequence this snapshot accounts for. */
+  tipSeq: number;
+  /** base64url hash of the log at that sequence. */
+  tipHash: string;
+  snapshot: Uint8Array;
 }
 
 interface TablaDB extends DBSchema {
@@ -116,6 +138,10 @@ interface TablaDB extends DBSchema {
     key: string;
     value: BlobRecord;
     indexes: { byPlugin: string };
+  };
+  deals: {
+    key: string;
+    value: DealRecord;
   };
 }
 
@@ -153,6 +179,10 @@ export function db(): Promise<TablaDatabase> {
       if (!database.objectStoreNames.contains('blobs')) {
         const blobs = database.createObjectStore('blobs', { keyPath: 'sha256' });
         blobs.createIndex('byPlugin', 'pluginId');
+      }
+
+      if (!database.objectStoreNames.contains('deals')) {
+        database.createObjectStore('deals', { keyPath: 'gameId' });
       }
     },
   });

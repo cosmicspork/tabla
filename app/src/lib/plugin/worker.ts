@@ -11,10 +11,12 @@
  * primary control is that nothing secret is ever sent here.
  */
 import { loadLetras } from '../wasm/letras.ts';
+import { loadLetras2 } from '../wasm/letras2.ts';
 import { loadPlugin, type PluginModule } from '../wasm/plugin.ts';
 import {
   ASSET_MISSING,
   MODULE_MISSING,
+  moduleKey,
   type PluginOutcome,
   type PluginRequest,
   type PluginResponse,
@@ -52,7 +54,8 @@ const ready = loadPlugin();
  * worker cannot acquire code even by accident.
  */
 const loaders: Record<string, (bytes: Uint8Array) => Promise<PluginModule>> = {
-  letras: loadLetras,
+  'letras@1': loadLetras,
+  'letras@2': loadLetras2,
 };
 
 /** Modules already initialized here, bundled or provided. */
@@ -89,29 +92,34 @@ self.addEventListener('message', (event: MessageEvent<PluginRequest>) => {
  * has to have been provided; asking for one that has not been is a request the
  * host can satisfy and retry, which is what `MODULE_MISSING` says.
  */
-async function moduleFor(pluginId: string): Promise<PluginModule> {
+async function moduleFor(key: string, pluginId: string): Promise<PluginModule> {
   const bundled = await ready;
   if (bundled.available_plugins().includes(pluginId)) return bundled;
 
-  const provided = modules.get(pluginId);
+  const provided = modules.get(key);
   if (provided) return provided;
 
-  if (pluginId in loaders) throw new Error(MODULE_MISSING);
-  throw new Error(`unknown plugin: ${pluginId}`);
+  if (key in loaders) throw new Error(MODULE_MISSING);
+  throw new Error(`unknown plugin: ${key}`);
 }
 
 /** Which module a request is about, if it names a game at all. */
-function pluginOf(request: PluginRequest): string | undefined {
-  return 'pluginId' in request ? request.pluginId : undefined;
+function pluginOf(request: PluginRequest): { id: string; key: string } | undefined {
+  if (!('pluginId' in request)) return undefined;
+  return {
+    id: request.pluginId,
+    key: moduleKey(request.pluginId, request.pluginVersion),
+  };
 }
 
 async function handle(request: PluginRequest): Promise<void> {
   try {
     if (request.op === 'provideModule') {
-      const load = loaders[request.pluginId];
-      if (!load) throw new Error(`unknown plugin: ${request.pluginId}`);
+      const key = moduleKey(request.pluginId, request.pluginVersion);
+      const load = loaders[key];
+      if (!load) throw new Error(`unknown plugin: ${key}`);
 
-      modules.set(request.pluginId, await load(request.bytes));
+      modules.set(key, await load(request.bytes));
       self.postMessage({
         id: request.id,
         ok: true,
@@ -120,8 +128,8 @@ async function handle(request: PluginRequest): Promise<void> {
       return;
     }
 
-    const pluginId = pluginOf(request);
-    const plugin = pluginId === undefined ? await ready : await moduleFor(pluginId);
+    const plugin_ = pluginOf(request);
+    const plugin = plugin_ === undefined ? await ready : await moduleFor(plugin_.key, plugin_.id);
     const result = run(plugin, request);
     self.postMessage({
       id: request.id,
@@ -153,10 +161,19 @@ function run(
     case 'pluginVersion':
       return { kind: 'number', value: plugin.plugin_version(request.pluginId) };
 
+    case 'deck':
+      return { kind: 'bytes', value: plugin.deck(request.pluginId) };
+
     case 'encodeMove':
       return {
         kind: 'bytes',
         value: plugin.encodeMove(request.pluginId, request.json),
+      };
+
+    case 'decodeMove':
+      return {
+        kind: 'string',
+        value: plugin.decodeMove(request.pluginId, request.move),
       };
 
     case 'provideAsset':

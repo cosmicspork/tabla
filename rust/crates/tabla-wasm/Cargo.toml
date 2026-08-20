@@ -11,9 +11,11 @@ crate-type = ["cdylib", "rlib"]
 
 # Deliberately does NOT depend on any game plugin. The core holds the keys; game
 # rules live in a separate module loaded into a worker that has none. See
-# crates/tabla-plugin-wasm.
+# crates/tabla-plugin-wasm. `tabla-deal` is the curve arithmetic behind the tile
+# deal, and belongs on this side of that line for the same reason.
 [dependencies]
 tabla-core.workspace = true
+tabla-deal.workspace = true
 wasm-bindgen.workspace = true
 js-sys = "0.3"
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }

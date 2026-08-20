@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 
 import { loadCore, type CoreModule } from './core.ts';
 import { loadLetras } from './letras.ts';
+import { loadLetras2 } from './letras2.ts';
 import { loadPlugin, type PluginModule } from './plugin.ts';
 
 function resolve(relative: string): string {
@@ -38,6 +39,11 @@ export function letrasWasmPath(): string {
   return resolve('../../../static/plugins/letras-v1.wasm');
 }
 
+/** The same, for the current version of the word game. */
+export function letras2WasmPath(): string {
+  return resolve('../../../static/plugins/letras-v2.wasm');
+}
+
 export async function readCoreWasm(): Promise<Uint8Array> {
   return new Uint8Array(await readFile(coreWasmPath()));
 }
@@ -60,4 +66,12 @@ export async function loadPluginFromDisk(): Promise<PluginModule> {
 
 export async function loadLetrasFromDisk(): Promise<PluginModule> {
   return loadLetras(await readLetrasWasm());
+}
+
+export async function readLetras2Wasm(): Promise<Uint8Array> {
+  return new Uint8Array(await readFile(letras2WasmPath()));
+}
+
+export async function loadLetras2FromDisk(): Promise<PluginModule> {
+  return loadLetras2(await readLetras2Wasm());
 }

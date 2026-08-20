@@ -90,6 +90,14 @@ export const serverMessageSchema = z.discriminatedUnion('t', [
   }),
   z.object({ t: z.literal('entries'), fromSeq: z.number().int(), entries: z.array(wireEntrySchema) }),
   z.object({ t: z.literal('appended'), tipSeq: z.number().int(), tipHash: b64url.length(43) }),
+  /**
+   * How many other participants hold a live socket on this room right now.
+   *
+   * This is liveness of an opaque key hash and nothing else — the relay has
+   * always known it (it suppresses push for a connected opponent), and saying
+   * so out loud reveals no more than the fan-out already does.
+   */
+  z.object({ t: z.literal('presence'), others: z.number().int().nonnegative() }),
   z.object({ t: z.literal('err'), code: z.string(), detail: z.string().optional() }),
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

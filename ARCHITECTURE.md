@@ -508,76 +508,139 @@ itself. A genuinely new game therefore still needs an app update. What phase 3
 buys is that a game's *rules and data* — the bulk of it — are fetched on
 demand, verified before they run, and removable afterwards.
 
+## The deal
+
+Tiles are dealt from one encrypted deck that neither player can read. Both
+shuffle it, every step carries a proof, and a tile becomes visible only when
+somebody with the right to see it opens it. This is the standard mental-poker
+construction — threshold ElGamal over ristretto255 with a zero-knowledge
+argument of correct shuffle — and it is how the word game deals now.
+
+### The schedule
+
+Each player derives a secret share of the deck key from their identity, so a
+restored backup recomputes it and can still read a rack it was dealt. The public
+halves are added: the deck is encrypted under the sum, and opening anything
+needs a contribution from both. The bag in canonical order is public and
+identical on both devices, so the starting deck costs no log entries at all —
+the shuffles are what make it a bag.
+
+| Move | Author | Carries |
+|---|---|---|
+| 0 | initiator | key share, proof of knowledge, commitment to its half of the toss |
+| 1 | claimer | key share, proof, its half of the toss in the clear, first shuffle |
+| 2 | initiator | second shuffle, opens its toss, deals the claimer's rack |
+| 3 | claimer | deals the initiator's rack |
+| 4… | initiator | play begins, or a yield if the toss gave the opening away |
+
+Both players shuffle. One would be enough to hide the deck from the opponent and
+not at all from the shuffler.
+
+### What each proof pins down
+
+- **Proof of knowledge**, on a published key share: that its author can actually
+  open it. Without this a player could publish `Y − X_opponent` for a `Y` of
+  their choosing and control the joint key outright.
+- **Discrete-logarithm equality**, on every decryption share: that the share was
+  computed with the key its author published. A share is otherwise
+  unfalsifiable in the wrong direction — a wrong one opens a tile to nonsense,
+  which without this proof is indistinguishable from bad luck.
+- **The shuffle argument**, on every shuffle: that the new deck is a permutation
+  of the old one, re-randomised, with nothing added, dropped, duplicated, or
+  substituted.
+
+### Drawing, playing, and opening
+
+A tile is dealt by its holder's *opponent* publishing a decryption share for the
+next position off the top. Only the recipient can combine it with their own, so
+only they can read it. Which positions each player holds is public; what is in
+them is not. Tile counting is exact.
+
+Playing a tile means opening it: the placer publishes their own share, both
+shares are then in the log, and anyone can check the tile against what the move
+claims. Playing something you were not dealt is not a thing that can happen.
+At the end, each player opens their remaining rack so the closing adjustment is
+public too.
+
+**Refills ride the opponent's next entry.** After a play spends `n` tiles, the
+opponent's next entry carries shares for the next `n` positions — an entry that
+was going to exist anyway. Nothing is handed over before the play that earns it
+is already public, which is what lets all of this work at correspondence pace.
+A successful challenge cancels the refill along with the play, and nothing was
+pre-issued to take back.
+
+### What it costs
+
+A shuffle is the largest entry the protocol writes: 102 ciphertexts at 64 bytes
+each is 6,528 B, and the proof is 10,240 B, for about 17 KB against the relay's
+64 KiB ceiling. Everything else is small — a key share is roughly 350 B and a
+seven-tile refill about 700 B. Proving a full bag takes about 26 ms and
+verifying it about 16 ms on a development machine; a browser is slower, which is
+why a verified deal is snapshotted against the log tip rather than recomputed on
+every render.
+
+### The limits, stated plainly
+
+- **A player can stall.** Refusing to open a final rack leaves the game
+  unsettled, exactly as refusing to move does. Cheating is impossible; leaving
+  is not, and no client-side protocol fixes that. Resigning is the escape hatch.
+- **The relay sees sizes and timing.** It cannot read a deck or a tile, but it
+  can tell a shuffle entry from a pass by its length. That was already true of
+  every other entry and is inherent to a relay that stores anything.
+- **Repeated tiles encrypt to the same point.** Both blanks, and every duplicate
+  letter, share a plaintext. This leaks nothing: re-randomised ElGamal
+  ciphertexts of equal plaintexts are indistinguishable without the key, and the
+  shuffle argument is zero knowledge, so neither the deck nor its proofs say
+  which positions match. Only opening does, which is what opening is for.
+- **The proof system is ours.** It is tested hard — including against a prover
+  run faithfully on a witness that is not a permutation — but it has not been
+  audited by anyone else.
+
 ## Fairness tiers
 
-**Casual, asynchronous (phase 2, built).** Hidden state such as a tile bag uses
-**private draw streams with an end-of-game audit**. This is not the design the
-original specification described, and the difference is worth setting out.
+There are none. There were going to be two, and the reasoning that produced
+them is worth keeping, because the correction is the interesting part.
 
-The specification asked for commit-reveal over a *jointly derived* seed: both
-players contribute entropy, the combined hash seeds one shuffle of a shared bag,
-and the seed is revealed at the end so every draw can be replayed. Those two
-halves cannot both hold. If both players can derive the joint seed then both can
-read the whole bag, including each other's racks, and there is nothing left to
-reveal at the end. If neither can derive it until the end, then neither can
-compute their own draws during the game. Opening part of a shared shuffle
-without opening the rest is precisely mental poker, which needs a live opponent
-for every draw and therefore belongs to the competitive tier below.
+**What was planned.** A casual asynchronous tier using private draw streams,
+and a competitive real-time tier using mental poker — separated because opening
+a card in mental poker needs the opponent's live decryption share, which reads
+as incompatible with correspondence play. Competitive would mean live; casual
+would mean whenever you get to it.
 
-What is built instead keeps every property the specification was reaching for.
-Each player has their own secret for the game, derived from their identity key
-(see [Key derivation](#key-derivation)). Player P's *i*th tile is chosen by
+**Why that turned out to be wrong.** The premise holds in general and does not
+hold here, because of a rule the game already had: you draw after your opponent
+moves, not when you play. That rule exists so a player cannot see their next
+tiles before deciding how many to spend — and it puts an opponent entry between
+every play and its refill. That entry is exactly the slot a decryption share
+needs. The shares are issued *after* the play's width is already public, so
+nothing is pre-issued and nothing leaks lookahead; the specification's warning
+about pre-issued shares is about a design this one does not use.
 
-```text
-SHA-256(s_P ‖ nonce ‖ i)
-```
+So full mental-poker fairness runs at correspondence pace, and a second tier
+would have bought nothing. The tiers collapsed into one.
 
-where `nonce` is fresh randomness from the **opponent's** most recent log entry.
-P publishes `H(s_P)` before any nonce they will draw against exists, so P cannot
-search for a seed that deals well; the opponent chooses nonces without knowing
-`s_P`, so they cannot steer the draw either. Refills wait for the opponent's
-next entry rather than landing when a play is made, so a player cannot see what
-they are about to draw before deciding how many tiles to spend — and so a play
-that is challenged off the board can have its refill cancelled.
+**What the earlier design cost, and no longer does.** Version 1 dealt each
+player from the tiles *they* had not seen, from a secret of their own, and
+reconciled the two streams with an audit when the game ended. Every property it
+reached for held — neither player could predict or steer the other's draws, and
+every draw was recomputable afterwards — but both players could hold the same
+physical tile at once, so tile counting was soft, and a cheat was only ever
+*detectable*. Under the deal there is one real deck, tile counting is exact, and
+cheating is impossible rather than visible.
 
-After every draw the player publishes `H(rack ‖ salt)`. At the end of the game
-both reveal their seeds, and every draw either of them made is recomputed from
-scratch and checked against those promises, along with every tile they claimed
-to play. The audit is a pure function of the public log, so both devices reach
-the same verdict, and a player who fails it loses whatever the score said.
-Cheating is made visible rather than impossible, which is the right bar among
-people who know each other.
-
-**The cost, stated plainly.** A player draws from the tiles *they* have not
-seen, which includes whatever is on the opponent's rack. So both players can
-hold the same physical tile at once, and over a game the board can show more
-copies of a letter than the bag contained. Tile counting is softened as a
-result. This is what asynchronous hidden state costs; the collision-free version
-is the competitive tier, and it is not asynchronous.
-
-Two further limits are accepted rather than solved. A player who loses the
-opening toss can simply abandon the game, which is indistinguishable from any
-other abandoned game. And a player who refuses to reveal at the end leaves the
-game unsettled; resigning is the escape hatch, and it skips the audit by
-design.
-
-**Competitive, real-time (phase 4, not built).** Full mental poker, threshold ElGamal with
-a verifiable shuffle. This tier is **synchronous by design**: opening a tile
-requires the opponent's live decryption share. Pre-issuing shares to make it
-asynchronous does not work — with variable-width draws (refill-to-seven), the
-number of shares a player holds leaks lookahead. Competitive means live; casual
-means correspondence. Nothing in phases 1 to 3 may preclude this.
+Games started under version 1 finish under version 1. Its rules, its module and
+its hash stay exactly where they were; see **Plugin distribution**.
 
 ## Letras
 
-The word game that phase 2 exists for. The rules live in `tabla-letras` and are
-summarised here only where they bear on the protocol; the crate documentation
-has the rest.
+The word game. Its rules live in `tabla-letras` and are summarised here only
+where they bear on the protocol; the crate documentation has the rest.
 
 **Turn structure.** The log alternates strictly, so every turn is an entry:
 passing, exchanging, yielding the opening, and forfeiting a challenged turn are
-all moves. A game opens with two commitments, the initiator opening the toss for
-who plays first, and — if the toss went against the claimer's slot — a yield.
+all moves. A game opens with the deal's ceremony — key shares, two shuffles, and
+the opening racks — which also carries the toss for who plays first, and then a
+yield if it went against whoever holds the next slot.
 
 **Challenges.** A play is legal the moment it is geometrically sound. Whether it
 is a word is a question the opponent has to raise, and pays for if they raise it
@@ -591,8 +654,9 @@ would make a wrong word impossible rather than punishable, which is a different
 game, and it would turn the word list from a referee into a rule.
 
 **Honour mode.** There is none, and there will not be one beyond a label. The
-specification is explicit: no anti-cheat. The audit is not anti-cheat — it is a
-receipt.
+specification is explicit: no anti-cheat, and none of this is anti-cheat: the
+deal makes an illegal tile impossible rather than punishable, which is a
+property of the protocol and not a judgement about anybody.
 
 **Original content.** The board layout, the tile distribution, the point values,
 and the name are all original, and two of them are original *by construction*:
@@ -635,10 +699,15 @@ worse than one that names them:
   shell are exercised against an emulated iPhone, which gets the user agent and
   viewport right but is still Chromium. Home Screen installation, seven-day
   cache eviction, and Safari's push implementation need hardware.
-- **Opponent tile possession, during a game.** Nothing checks that the tiles an
-  opponent plays are tiles they actually drew until both seeds are revealed at
-  the end. That is not an oversight; it is what hidden state means. The audit is
-  the check, and it is retrospective by construction.
+- **Our own proof system.** The shuffle argument, the key-share proof and the
+  share proofs are implemented here rather than taken from an audited library,
+  because no maintained one exists for this construction. They are tested hard,
+  including against a prover run faithfully on a witness that is not a
+  permutation, and nobody outside this repository has reviewed them.
+- **Opponent tile possession, in games started under version 1 of the word
+  game.** Those rules check that the tiles an opponent played were tiles they
+  drew only when both seeds are revealed at the end. That was what hidden state
+  cost before the deal; games still being played under those rules still pay it.
 - **Tombstone permanence against the operator.** A tombstone protects against a
   relay that lost data or is lying about history. It cannot protect against
   someone with database access deleting the row; that is outside the threat
@@ -657,4 +726,16 @@ worse than one that names them:
 3. **Done:** downloadable plugins with a signed manifest and pinned hashes.
    Letras is fetched on first play and removable in settings; tic tac toe stays
    bundled so a fresh install can play offline.
-4. Real-time competitive tier.
+4. **Done:** one encrypted deck, shuffled by both players and proven at every
+   step — see **The deal**. It was specified as a separate real-time tier; it
+   turned out not to need one, and the tiers collapsed. Presence landed with it,
+   for every game.
+
+## Roadmap
+
+**Live games, with a clock.** Presence tells you the other player is there; it
+does nothing else. A per-game choice between correspondence and live would add a
+timer, abandon a game whose player has been away too long, and send a reminder
+before it does. Nothing in the protocol needs to change for it — the deal
+already works at either pace — so this is a product decision about how a game
+ends, not a cryptographic one. Not built.

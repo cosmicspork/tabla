@@ -17,7 +17,9 @@
 //! One build of this crate is bundled into the app; others are built with a
 //! single game selected and downloaded on demand, their hashes pinned in a
 //! signed manifest. Which games a binary carries is a cargo feature, so a
-//! module shipped for one game holds no code for any other. What a plugin is
+//! module shipped for one game holds no code for any other — and, since a
+//! version of a game is a different set of rules rather than a setting, a
+//! module built for one version holds no code for another. What a plugin is
 //! permitted to do is the same either way — being fetched changes where the
 //! bytes came from, not what they may touch.
 
@@ -39,20 +41,23 @@ fn lookup(plugin_id: &str) -> Result<&'static dyn BytePlugin, JsError> {
         }
     }
 
-    #[cfg(feature = "letras")]
+    #[cfg(feature = "letras-v1")]
     {
-        const LETRAS: tabla_letras::Plugin = tabla_letras::Plugin::new();
-        if plugin_id == tabla_letras::Letras::ID {
+        const LETRAS: tabla_letras::v1::Plugin = tabla_letras::v1::Plugin::new();
+        if plugin_id == tabla_letras::v1::Letras::ID {
+            return Ok(&LETRAS);
+        }
+    }
+
+    #[cfg(feature = "letras-v2")]
+    {
+        const LETRAS: tabla_letras::v2::Plugin = tabla_letras::v2::Plugin::new();
+        if plugin_id == tabla_letras::v2::Letras::ID {
             return Ok(&LETRAS);
         }
     }
 
     Err(JsError::new(&format!("unknown plugin: {plugin_id}")))
-}
-
-fn seed32(seed: &[u8]) -> Result<[u8; 32], JsError> {
-    seed.try_into()
-        .map_err(|_| JsError::new("seed must be 32 bytes"))
 }
 
 fn plugin_err(e: PluginError) -> JsError {
@@ -63,8 +68,10 @@ fn plugin_err(e: PluginError) -> JsError {
 #[wasm_bindgen]
 pub fn available_plugins() -> Vec<String> {
     [
-        #[cfg(feature = "letras")]
-        tabla_letras::Letras::ID,
+        #[cfg(feature = "letras-v1")]
+        tabla_letras::v1::Letras::ID,
+        #[cfg(feature = "letras-v2")]
+        tabla_letras::v2::Letras::ID,
         #[cfg(feature = "tictactoe")]
         tabla_tictactoe::TicTacToe::ID,
     ]
@@ -80,18 +87,44 @@ pub fn plugin_version(plugin_id: &str) -> Result<u32, JsError> {
     Ok(lookup(plugin_id)?.version())
 }
 
+/// The deck a game with hidden state is dealt from, in canonical order.
+///
+/// Empty for a game that has none. This is public information — the same list
+/// on both devices, which is exactly why establishing the deck costs no log
+/// entries — and it lives with the rules because the rules are what define it.
+/// The host needs it to set up the deal, which happens on the other side of
+/// this boundary, where the keys are.
+#[wasm_bindgen]
+pub fn deck(plugin_id: &str) -> Result<Vec<u8>, JsError> {
+    // Not on the plugin trait: only a game that hides something has a deck, and
+    // widening the trait for one of them would be describing tic tac toe in
+    // terms it has no use for.
+    #[cfg(feature = "letras-v2")]
+    if plugin_id == tabla_letras::v2::Letras::ID {
+        return Ok(tabla_letras::tiles::deck());
+    }
+
+    lookup(plugin_id)?;
+    Ok(Vec::new())
+}
+
 /// `assets` is the bulk reference data a game needs — a word list, say. It is
 /// passed in because a plugin cannot fetch anything itself, and the game checks
 /// it against the hash its configuration pins rather than trusting the host.
+///
+/// `private` is what this device knows that the log does not say out loud:
+/// entropy for a game that derives its own draws, or the tile values a deal has
+/// opened to this player. Its shape is the game's business — a plugin that is
+/// handed the wrong shape says so.
 #[wasm_bindgen]
 pub fn setup(
     plugin_id: &str,
     config: &[u8],
-    seed: &[u8],
+    private: &[u8],
     assets: &[u8],
 ) -> Result<Vec<u8>, JsError> {
     lookup(plugin_id)?
-        .setup(config, &seed32(seed)?, assets)
+        .setup(config, private, assets)
         .map_err(plugin_err)
 }
 
@@ -167,13 +200,13 @@ pub fn decode_move(plugin_id: &str, bytes: &[u8]) -> Result<String, JsError> {
 pub fn replay(
     plugin_id: &str,
     config: &[u8],
-    seed: &[u8],
+    private: &[u8],
     moves: Vec<js_sys::Uint8Array>,
     assets: &[u8],
 ) -> Result<Vec<u8>, JsError> {
     let moves: Vec<Vec<u8>> = moves.iter().map(|m| m.to_vec()).collect();
     lookup(plugin_id)?
-        .replay(config, &seed32(seed)?, &moves, assets)
+        .replay(config, private, &moves, assets)
         .map_err(plugin_err)
 }
 
@@ -196,13 +229,13 @@ mod tests {
         );
         assert_eq!(
             ids.iter().any(|id| id == "letras"),
-            cfg!(feature = "letras")
+            cfg!(feature = "letras-v1") || cfg!(feature = "letras-v2")
         );
 
         #[cfg(feature = "tictactoe")]
         assert!(lookup("tictactoe").is_ok());
 
-        #[cfg(feature = "letras")]
+        #[cfg(any(feature = "letras-v1", feature = "letras-v2"))]
         assert!(lookup("letras").is_ok());
     }
 }

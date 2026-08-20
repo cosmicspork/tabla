@@ -142,8 +142,36 @@ function seedFor(label: string): Uint8Array {
 
 const encodeMove = (cell: number) => plugin.encodeMove('tictactoe', JSON.stringify({ cell }));
 
-/** Lets queued socket messages be delivered. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+/** Waits for one client's log to reach a sequence. */
+const reaches = (who: Client, seq: number) =>
+  until(() => who.tipSeq === seq, `a log to reach ${seq}`);
+
+/** Waits for a client to finish its opening exchange with the relay. */
+const connected = (who: Client) =>
+  until(() => who.engine.status === 'synced', 'a client to sync');
+
+/** Waits for the relay to confirm everything a client has written. */
+const flushed = (who: Client) =>
+  until(() => who.engine.pendingCount === 0, 'the relay to confirm a write');
+
+/**
+ * Waits for something to become true, rather than for a fixed interval.
+ *
+ * Everything here is a round trip through a Durable Object, and how long that
+ * takes depends on the machine. A sleep long enough for a laptop is not long
+ * enough for a loaded CI runner, and a sleep long enough for both would make
+ * the suite slow for nobody's benefit.
+ */
+async function until(
+  condition: () => boolean | Promise<boolean>,
+  what: string,
+): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
 
 describe('two clients playing through the relay', () => {
   it('completes a full game and agrees on the result', async () => {
@@ -151,23 +179,27 @@ describe('two clients playing through the relay', () => {
 
     await alice.engine.connect();
     await bob.engine.connect();
-    await settle();
+    await connected(alice);
+    await connected(bob);
 
     // Prologue: the claimer joins, the initiator writes the configuration.
     bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
-    await settle();
+    await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
-    await settle();
+    await reaches(bob, 1);
 
     // Alice takes the top row; Bob answers down the middle-left.
     for (const [i, cell] of [0, 3, 1, 4, 2].entries()) {
       const seq = 2 + i;
       const mover = seq % 2 === 0 ? alice : bob;
+      const waiter = seq % 2 === 0 ? bob : alice;
       mover.engine.appendLocal(
         mover.identity,
         mover.session.sealMove(seq, nonce(seq), encodeMove(cell)),
       );
-      await settle();
+      // The next move is the opponent's, so it cannot be made until they have
+      // this one. Waiting for that is also what the assertion below is about.
+      await reaches(waiter, seq);
     }
 
     expect(alice.tipSeq).toBe(6);
@@ -190,26 +222,24 @@ describe('two clients playing through the relay', () => {
     const { alice, bob } = makeGame('sync-async-00001');
 
     await bob.engine.connect();
-    await settle();
+    await connected(bob);
     bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
-    await settle();
+    await flushed(bob);
     bob.engine.disconnect();
 
     // Alice arrives later, picks up Bob's join, and plays two entries.
     await alice.engine.connect();
-    await settle();
-    expect(alice.tipSeq).toBe(0);
+    await until(() => alice.tipSeq === 0, "Alice to pick up Bob's join");
 
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
     alice.engine.appendLocal(alice.identity, alice.session.sealMove(2, nonce(2), encodeMove(4)));
-    await settle();
+    await flushed(alice);
     alice.engine.disconnect();
 
     // Bob comes back and catches up without either of them being online together.
     await bob.engine.connect();
-    await settle();
+    await until(() => bob.tipSeq === 2, 'Bob to catch up');
 
-    expect(bob.tipSeq).toBe(2);
     expect(bob.moves().map((m) => m[0])).toEqual([4]);
     expect(bob.errors).toEqual([]);
     bob.engine.disconnect();
@@ -219,9 +249,9 @@ describe('two clients playing through the relay', () => {
     const { gameId, alice, bob } = makeGame('sync-offline-001');
 
     await bob.engine.connect();
-    await settle();
+    await connected(bob);
     bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
-    await settle();
+    await flushed(bob);
     bob.engine.disconnect();
 
     // Alice has never connected. She plays anyway.
@@ -233,9 +263,7 @@ describe('two clients playing through the relay', () => {
     // Connecting flushes what the relay is missing. There is no outbox to
     // replay: the log past the relay's tip *is* the queue.
     await alice.engine.connect();
-    await settle();
-
-    expect(alice.engine.pendingCount).toBe(0);
+    await until(() => alice.engine.pendingCount === 0, 'Alice to flush her backlog');
     expect((await roomStub(gameId).state()).tipSeq).toBe(2);
     alice.engine.disconnect();
   });
@@ -247,20 +275,22 @@ describe('surviving relay eviction', () => {
 
     await alice.engine.connect();
     await bob.engine.connect();
-    await settle();
+    await connected(alice);
+    await connected(bob);
 
     bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
-    await settle();
+    await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
-    await settle();
+    await reaches(bob, 1);
     for (const [i, cell] of [0, 3].entries()) {
       const seq = 2 + i;
       const mover = seq % 2 === 0 ? alice : bob;
+      const waiter = seq % 2 === 0 ? bob : alice;
       mover.engine.appendLocal(
         mover.identity,
         mover.session.sealMove(seq, nonce(seq), encodeMove(cell)),
       );
-      await settle();
+      await reaches(waiter, seq);
     }
 
     expect(alice.tipSeq).toBe(3);
@@ -276,18 +306,16 @@ describe('surviving relay eviction', () => {
 
     // Alice comes back to an empty room and re-uploads her whole log.
     await alice.engine.connect();
-    await settle();
+    await until(async () => (await room.state()).tipSeq === 3, 'the relay to be re-filled');
 
     expect(alice.errors).toEqual([]);
-    expect((await room.state()).tipSeq).toBe(3);
 
     // The game carries on as if nothing happened.
     alice.engine.appendLocal(alice.identity, alice.session.sealMove(4, nonce(4), encodeMove(1)));
-    await settle();
+    await until(async () => (await room.state()).tipSeq === 4, 'the relay to take the move');
 
     await bob.engine.connect();
-    await settle();
-    expect(bob.tipSeq).toBe(4);
+    await reaches(bob, 4);
     expect(bob.errors).toEqual([]);
 
     alice.engine.disconnect();
@@ -302,12 +330,13 @@ describe('surviving relay eviction', () => {
 
     await alice.engine.connect();
     await bob.engine.connect();
-    await settle();
+    await connected(alice);
+    await connected(bob);
 
     bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
-    await settle();
+    await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
-    await settle();
+    await reaches(bob, 1);
 
     alice.engine.disconnect();
     bob.engine.disconnect();
@@ -320,12 +349,11 @@ describe('surviving relay eviction', () => {
     expect((await room.state()).tipSeq).toBe(1);
 
     await alice.engine.connect();
-    await settle();
+    await until(() => alice.engine.status === 'synced', 'Alice to resync');
     alice.engine.appendLocal(alice.identity, alice.session.sealMove(2, nonce(2), encodeMove(4)));
-    await settle();
+    await until(async () => (await room.state()).tipSeq === 2, 'the relay to take the move');
 
     expect(alice.errors).toEqual([]);
-    expect((await room.state()).tipSeq).toBe(2);
     alice.engine.disconnect();
   });
 
@@ -334,20 +362,22 @@ describe('surviving relay eviction', () => {
 
     await alice.engine.connect();
     await bob.engine.connect();
-    await settle();
+    await connected(alice);
+    await connected(bob);
 
     bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
-    await settle();
+    await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
-    await settle();
+    await reaches(bob, 1);
     for (const [i, cell] of [0, 3, 1].entries()) {
       const seq = 2 + i;
       const mover = seq % 2 === 0 ? alice : bob;
+      const waiter = seq % 2 === 0 ? bob : alice;
       mover.engine.appendLocal(
         mover.identity,
         mover.session.sealMove(seq, nonce(seq), encodeMove(cell)),
       );
-      await settle();
+      await reaches(waiter, seq);
     }
     alice.engine.disconnect();
     bob.engine.disconnect();
@@ -376,11 +406,52 @@ describe('surviving relay eviction', () => {
     });
 
     await engine.connect();
-    await settle();
+    await until(() => refusals.length > 0, 'the client to refuse the rollback');
 
     expect(refusals).toContain('tombstone');
     expect(engine.status).toBe('refused');
     // Nothing was uploaded, so the relay still holds no truncated history.
     expect((await room.state()).tipSeq).toBe(-1);
+  });
+});
+
+describe('presence', () => {
+  it('tells each player when the other is connected, and when they leave', async () => {
+    const { alice, bob } = makeGame('sync-presence-01');
+
+    await alice.engine.connect();
+    await connected(alice);
+
+    // Alone in the room: nobody to be present.
+    expect(alice.engine.opponentPresent).toBe(false);
+
+    await bob.engine.connect();
+    await until(() => alice.engine.opponentPresent, 'Alice to see Bob arrive');
+
+    // Bob's hello tells Alice as much as it tells Bob.
+    await until(() => bob.engine.opponentPresent, 'Bob to see Alice');
+
+    bob.engine.disconnect();
+    await until(() => !alice.engine.opponentPresent, 'Alice to see Bob leave');
+
+    expect(alice.errors).toEqual([]);
+    alice.engine.disconnect();
+  });
+
+  it('is forgotten by a client whose own connection drops', async () => {
+    const { alice, bob } = makeGame('sync-presence-02');
+
+    await alice.engine.connect();
+    await bob.engine.connect();
+    await until(() => alice.engine.opponentPresent, 'Alice to see Bob arrive');
+
+    // Alice hangs up. She forgets locally rather than waiting to be told,
+    // because a closed socket is exactly the state in which no frame can
+    // arrive to correct her — and Bob is told in the ordinary way.
+    alice.engine.disconnect();
+    await until(() => !bob.engine.opponentPresent, 'Bob to be told Alice left');
+
+    expect(alice.engine.opponentPresent).toBe(false);
+    bob.engine.disconnect();
   });
 });
