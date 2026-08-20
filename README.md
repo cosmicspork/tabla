@@ -1,8 +1,13 @@
-# tabla
+# Tabla
+
+[![ci](https://github.com/cosmicspork/tabla/actions/workflows/ci.yml/badge.svg)](https://github.com/cosmicspork/tabla/actions/workflows/ci.yml)
 
 Ad-free, privacy-preserving asynchronous multiplayer games for people who know
 each other — a replacement for the kind of turn-based game app that pays for
 itself with ads and data harvesting.
+
+**Playable at [tabla.joshbowen.net](https://tabla.joshbowen.net).** Start a
+game, send the link to one person, and play at whatever pace suits you both.
 
 The defining property: **the relay is zero-knowledge.** It transports and stores
 ciphertext blobs plus minimal routing metadata. It never sees game state, moves,
@@ -10,7 +15,15 @@ chat, or keys. All cryptography and rule validation happen on the clients.
 
 Two games: tic tac toe, which is part of the app, and **Letras**, a word game
 that downloads itself the first time you play one. See
-[ARCHITECTURE.md](ARCHITECTURE.md) for the protocol and the phase plan.
+[ARCHITECTURE.md](ARCHITECTURE.md) for the protocol, the design decisions, and
+what is deliberately not solved.
+
+## About the name
+
+**Tabula** was a Roman board game for two — the one Emperor Zeno famously lost
+a winning position in, and the ancestor of backgammon. It is also just Latin
+for *board*, the sense that survives in Spanish *tabla*. A two-player board
+game named after the two-player board game seemed right.
 
 ## Status
 
@@ -219,6 +232,15 @@ no way back. A new list ships as a new id with a new pinned hash, and games
 already under way keep playing against the one they started with. See
 [wordlist/PROVENANCE.md](wordlist/PROVENANCE.md).
 
+## Reporting a security issue
+
+This is a cryptographic protocol, and its proof system was implemented here
+rather than taken from an audited library — see
+[what is not automatically verifiable](ARCHITECTURE.md#what-is-not-automatically-verifiable).
+If you find a hole in it, please don't open a public issue: report it privately
+via [GitHub security advisories](https://github.com/cosmicspork/tabla/security/advisories/new).
+See [SECURITY.md](SECURITY.md).
+
 ## License
 
-MIT
+MIT.
