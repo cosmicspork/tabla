@@ -33,9 +33,7 @@
    * labelled: the current version is just the game.
    */
   const supersededBy = (entry: { id: string; version: number }) =>
-    (current.get(entry.id) ?? entry.version) > entry.version
-      ? `version ${entry.version}`
-      : null;
+    (current.get(entry.id) ?? entry.version) > entry.version ? `version ${entry.version}` : null;
 
   let states = $state<Record<string, InstalledState>>({});
   let busy = $state<string | null>(null);

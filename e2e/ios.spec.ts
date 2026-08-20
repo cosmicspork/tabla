@@ -35,7 +35,7 @@ async function gameOnIphone(browser: Browser, startUrl: string) {
   await a.goto(startUrl);
   await startGame(a);
   // Wait for the invite to render before reading it out.
-  await expect(a.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
 
   const link = await a.evaluate(
     () => document.querySelector<HTMLElement>('[data-invite-link]')?.dataset.inviteLink ?? '',
@@ -95,7 +95,7 @@ test('permission is never requested without a tap', async ({ browser }) => {
 
   await page.goto('/?simulate=ios-standalone');
   await startGame(page);
-  await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(page.getByTestId('status')).toContainText('Waiting for someone');
 
   // The app has loaded, created a game, and rendered — and still not asked.
   expect(asked).toBe(false);

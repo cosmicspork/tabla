@@ -22,11 +22,8 @@
 
 <div class="card stack" data-invite-link={link}>
   <div>
-    <h2>Invite someone</h2>
-    <p class="muted">
-      This link works once. Whoever opens it first becomes your opponent, and every later attempt is
-      refused.
-    </p>
+    <h2>Send this to someone</h2>
+    <p class="muted">It works once. Whoever opens it first is your opponent.</p>
   </div>
 
   <div class="qr">
@@ -41,10 +38,14 @@
     <button onclick={copy}>{copied ? 'Copied' : 'Copy'}</button>
   </div>
 
-  <p class="muted small">
-    The part of the link after <code>#</code> is the key. Browsers never send it to a server, so the relay
-    stores an invite it cannot read.
-  </p>
+  <details class="muted small">
+    <summary>Why the link is safe to send</summary>
+    <p>
+      The part after <code>#</code> is the key that unlocks the invite. Browsers never send that part
+      to a server, so the relay is holding something it cannot read — and the QR code is drawn here, on
+      your device, key and all.
+    </p>
+  </details>
 </div>
 
 <style>
@@ -64,5 +65,13 @@
   .small {
     font-size: 0.8rem;
     margin: 0;
+  }
+
+  .small summary {
+    cursor: pointer;
+  }
+
+  .small p {
+    margin: 0.5rem 0 0;
   }
 </style>

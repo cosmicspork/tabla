@@ -31,7 +31,7 @@ test('invite: the whole of starting a game', async ({ browser }) => {
 
   await page.goto('/');
   await startGame(page, 'letras');
-  await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(page.getByTestId('status')).toContainText('Waiting for someone');
   await expect(page.locator('[data-invite-link]')).toBeVisible();
 
   await page.screenshot({ path: `${OUT}/invite.png` });
@@ -80,7 +80,7 @@ test('games on this device: what was downloaded, and how to be rid of it', async
 
   await page.goto('/');
   await startGame(page, 'letras');
-  await expect(page.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(page.getByTestId('status')).toContainText('Waiting for someone');
   await joiner.goto(await inviteLink(page));
 
   // Wait until the module is actually downloaded, or the card reads "not

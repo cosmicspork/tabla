@@ -4,9 +4,14 @@
   import { listContacts } from '$lib/db/store.ts';
   import type { ContactRecord } from '$lib/db/schema.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
+  import { pageTitle } from '$lib/page-title.svelte.ts';
 
   let publicKey = $state('');
   let contacts = $state<ContactRecord[]>([]);
+
+  $effect(() => {
+    pageTitle.text = 'Settings';
+  });
 
   $effect(() => {
     void (async () => {
@@ -15,8 +20,6 @@
     })();
   });
 </script>
-
-<h1>Settings</h1>
 
 <div class="stack">
   <section class="card">

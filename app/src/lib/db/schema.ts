@@ -20,6 +20,8 @@ export type GameStatus =
   | 'active'
   /** Someone won, drew, or resigned. */
   | 'finished'
+  /** The invite was never redeemed, and the relay has since dropped it. */
+  | 'expired'
   /** Claimed by a peer whose build cannot play this game. */
   | 'incompatible';
 
@@ -33,6 +35,13 @@ export interface GameRecord {
    * the share link can be shown again; cleared once the game is claimed.
    */
   blobKey?: string;
+  /**
+   * When the relay will drop an unredeemed invite, from the relay's own clock.
+   *
+   * Kept so the list can say how long is left without asking, and so an invite
+   * that has gone can be told apart from one nobody has opened yet.
+   */
+  expiresAt?: number;
   pluginId: string;
   pluginVersion: number;
   role: Role;

@@ -3,19 +3,22 @@
 
   import { listGames } from '$lib/db/store.ts';
   import type { GameRecord } from '$lib/db/schema.ts';
-  import { createGame, refreshPendingGame } from '$lib/games.ts';
-  import { fingerprint, myPublicKey } from '$lib/identity.ts';
+  import { cancelPendingGame, createGame, refreshPendingGame } from '$lib/games.ts';
+  import { pageTitle } from '$lib/page-title.svelte.ts';
   import { availableGames, titleOf } from '$lib/registry.ts';
 
   let games = $state<GameRecord[]>([]);
-  let publicKey = $state('');
   let creating = $state<string | null>(null);
   let picking = $state(false);
   let failure = $state<string | null>(null);
 
+  // Home is the one screen with no page title: the header shows the wordmark.
+  $effect(() => {
+    pageTitle.text = '';
+  });
+
   async function refresh() {
     games = await listGames();
-    publicKey = await myPublicKey();
 
     // Pending invites may have been redeemed since we last looked.
     const pending = games.filter((game) => game.status === 'pending');
@@ -43,15 +46,27 @@
     }
   }
 
+  async function cancel(game: GameRecord) {
+    if (!confirm('Call off this invite? The link will stop working for you either way.')) return;
+    failure = null;
+    try {
+      await cancelPendingGame(game.gameId);
+      await refresh();
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    }
+  }
+
   function label(game: GameRecord): string {
     if (game.status === 'pending') return 'Waiting for someone to join';
+    if (game.status === 'expired') return 'Nobody took this invite';
     if (game.status === 'incompatible') return 'Needs a newer version of tabla';
     if (game.status === 'finished') return game.outcome ?? 'Finished';
     return game.role === 'initiator' ? 'You started this one' : 'They invited you';
   }
 </script>
 
-<h1>Your games</h1>
+<h2 class="screen-title">Your games</h2>
 
 {#if failure}
   <p class="notice warn">{failure}</p>
@@ -73,7 +88,7 @@
         </button>
       {/each}
       <button class="ghost" onclick={() => (picking = false)} disabled={creating !== null}>
-        Never mind
+        Cancel
       </button>
     </div>
   {:else}
@@ -96,26 +111,37 @@
             <span class="title">{titleOf(game.pluginId)}</span>
             <span class="muted">{label(game)}</span>
           </a>
+          {#if game.status === 'pending' || game.status === 'expired'}
+            <button class="ghost cancel" onclick={() => cancel(game)}>
+              {game.status === 'expired' ? 'Remove' : 'Cancel invite'}
+            </button>
+          {/if}
         </li>
       {/each}
     </ul>
   {/if}
 </div>
 
-<footer>
-  <p class="muted">
-    Your identity is <span class="mono">{fingerprint(publicKey)}…</span><br />
-    Nobody can look you up by it. Share a game link to play.
-  </p>
-</footer>
-
 <style>
+  /* The header owns the only `h1`, so the list heading is an `h2` that looks
+     like the page title it used to be. */
+  .screen-title {
+    font-size: 1.5rem;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.75rem;
+  }
+
   ul {
     list-style: none;
     margin: 0;
     padding: 0;
     display: grid;
     gap: 0.5rem;
+  }
+
+  li {
+    display: grid;
+    gap: 0.15rem;
   }
 
   .game {
@@ -156,7 +182,7 @@
     padding: 0.25rem;
   }
 
-  footer {
-    margin-top: 2.5rem;
+  .cancel {
+    justify-self: start;
   }
 </style>

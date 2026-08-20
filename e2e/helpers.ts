@@ -38,7 +38,7 @@ export async function letrasGame(browser: BrowserContext['browser']) {
   await a.goto('/');
   await startGame(a, 'letras');
 
-  await expect(a.getByRole('heading', { name: 'Waiting for a player' })).toBeVisible();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
   const link = await inviteLink(a);
 
   const b = await two.newPage();
