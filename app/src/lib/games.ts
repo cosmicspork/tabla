@@ -12,6 +12,7 @@ import {
 import { deleteGame, getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
+import { displayName, markOnboarded, PLACEHOLDER_NAME } from './profile.ts';
 import { requestPersistentStorage } from './lifecycle.ts';
 import { gameEntry, latestGame } from './registry.ts';
 import { cancelInvite, claimInvite, createInvite, inviteStatus, RelayError } from './relay.ts';
@@ -38,6 +39,15 @@ export async function createGame(
   origin: string,
   pluginId: string = CORE_PLUGIN_ID,
   version?: number,
+  /**
+   * Who this invite is meant for, when it was made from the contact list.
+   *
+   * An intention rather than a fact: the link is a bearer token, and whoever
+   * opens it first becomes the opponent whatever was intended. It is recorded
+   * so the game can be named straight away, and checked against the key that
+   * actually claims it — see `refreshPendingGame`.
+   */
+  invitee?: { publicKey: string; name: string },
 ): Promise<CreatedInvite> {
   // New games take the newest rules this build has. A version can be named
   // explicitly, which is how a test pins itself to rules that have since been
@@ -67,6 +77,9 @@ export async function createGame(
     identity.publicKey(),
     entry.seed === 'draw' ? randomBytes(32) : seed,
     BigInt(now),
+    // Sealed with everything else, so the relay holding this blob learns no
+    // more from it than it did before there were names.
+    await displayName(),
   );
 
   const { blobId, expiresAt, cancelToken } = await createInvite(toBase64Url(blob));
@@ -86,6 +99,8 @@ export async function createGame(
     status: 'pending',
     createdAt: now,
     lastActivity: now,
+    invitedContact: invitee?.publicKey,
+    opponentName: invitee?.name,
   };
 
   await putGame(game);
@@ -171,6 +186,9 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
     status: 'active',
     createdAt: now,
     lastActivity: now,
+    // Cached on the record so the list can say who a game is against without
+    // opening a contact for every row it draws.
+    opponentName: invite.name || undefined,
   };
 
   const compatible =
@@ -187,7 +205,15 @@ export async function joinGame(fragment: string): Promise<JoinResult> {
   }
 
   await putGame(game);
-  await rememberContact(game.initiatorPubKey, 'Opponent', now);
+  // Arriving on a link is an introduction of sorts: this device now has an
+  // identity and a game, and standing in front of the board to ask its owner's
+  // name would be asking at the worst possible moment. Profile is there for
+  // whenever they want one.
+  await markOnboarded();
+  // The name travelled inside the blob, so this is the first moment anyone
+  // could have known it. A name already saved for this key wins — a local
+  // rename is a decision, and a later handshake is not an argument against it.
+  await rememberContact(game.initiatorPubKey, invite.name || PLACEHOLDER_NAME, now);
   await requestPersistentStorage();
 
   return { ok: true, game };
@@ -226,7 +252,16 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
   );
 
   const now = Date.now();
-  await rememberContact(status.claimerPubKey, 'Opponent', now);
+
+  // Whoever opened the link is the opponent, whoever it was addressed to. If
+  // those differ, the name this game was given on creation is simply wrong, and
+  // dropping it lets the right one arrive from the log's `Join` entry.
+  const asIntended =
+    game.invitedContact === undefined || game.invitedContact === status.claimerPubKey;
+  // Named for now only by the fact that they exist: what they would like to be
+  // called is in the log's `Join` entry, which is not readable until the game is
+  // opened. `learnOpponentName` replaces this the moment it is.
+  await rememberContact(status.claimerPubKey, PLACEHOLDER_NAME, now);
 
   // The blob key is dropped once the invite is spent: the link is no longer
   // usable, so keeping the key would be storing a secret for no reason.
@@ -236,6 +271,7 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
     blobKey: undefined,
     cancelToken: undefined,
     lastActivity: now,
+    opponentName: asIntended ? game.opponentName : undefined,
   });
 }
 

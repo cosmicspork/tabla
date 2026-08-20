@@ -85,9 +85,13 @@ describe('core module', () => {
       alice.publicKey(),
       new Uint8Array(32).fill(0x33),
       1_780_000_000n,
+      'Ada',
     );
 
     const invite = core.openInvite(key, blob);
+    // The name is sealed with everything else: the relay holds the blob and
+    // cannot read any of it.
+    expect(invite.name).toBe('Ada');
     expect(invite.pluginId).toBe('tictactoe');
     expect(invite.pluginVersion).toBe(1);
     expect(hex(invite.initiatorPublicKey)).toBe(A_PUB);
@@ -107,6 +111,7 @@ describe('core module', () => {
       alice.publicKey(),
       new Uint8Array(32).fill(0x33),
       1_780_000_000n,
+      'Ada',
     );
 
     // This is exactly what the relay stores.
@@ -142,7 +147,7 @@ const nonce = (n: number) => new Uint8Array(24).fill(n);
 function playGame(cells: number[]) {
   const { alice, bob, session, log } = makeGame();
 
-  log.appendSigned(bob, session.sealJoin(nonce(0), bob.publicKey()));
+  log.appendSigned(bob, session.sealJoin(nonce(0), bob.publicKey(), 'Pooja'));
   log.appendSigned(alice, session.sealSetup(nonce(1), new Uint8Array()));
 
   cells.forEach((cell, i) => {

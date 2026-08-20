@@ -179,7 +179,7 @@ test('an invite nobody took can be called off, and the link dies with it', async
   await a.getByRole('button', { name: 'Cancel invite' }).click();
 
   // Back on the list, with nothing left behind.
-  await expect(a.getByRole('button', { name: 'Start a new game' })).toBeVisible();
+  await expect(a.getByRole('link', { name: 'Start a new game' })).toBeVisible();
   await expect(a.getByText('Invites out')).toBeHidden();
 
   // And the link is dead for whoever still has it — a local delete alone would

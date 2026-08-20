@@ -14,7 +14,21 @@ use crate::identity::Identity;
 use crate::{BLOB_ID_LEN, GAME_ID_LEN, HASH_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN, SIG_LEN};
 
 /// Current invite format version.
-pub const INVITE_VERSION: u16 = 1;
+///
+/// Version 2 added the initiator's display name. Version 1 blobs are still
+/// opened: an invite lives for seven days, and a link someone is holding when
+/// this ships should not stop working because of a field it does not carry.
+pub const INVITE_VERSION: u16 = 2;
+
+/// The last version that had no name in it.
+const INVITE_VERSION_UNNAMED: u16 = 1;
+
+/// The longest display name an invite will carry.
+///
+/// The blob is not padded, so its length grows with the name — a very long one
+/// would be visible to the relay as a larger blob. Thirty-two characters is
+/// more than a name needs and little enough to say nothing.
+pub const MAX_NAME_LEN: usize = 32;
 
 /// Associated data for the sealed blob.
 pub const INVITE_AAD: &[u8] = b"tabla-invite/v1";
@@ -36,6 +50,48 @@ pub struct InviteConfig {
     /// Entropy the initiator contributes to game setup.
     pub seed: [u8; 32],
     pub created_at: u64,
+    /// What the initiator would like to be called, and nothing more.
+    ///
+    /// Not an identifier: nobody checks it, two people may pick the same one,
+    /// and the recipient can rename them locally the moment they arrive. The
+    /// public key is who someone is; this is what to write next to it. It
+    /// travels sealed, so the relay never sees it — the whole point of putting
+    /// it here rather than in the claim.
+    pub name: String,
+}
+
+/// Version 1 of the same struct, kept exactly as it was.
+///
+/// Postcard is not self-describing: a field added to `InviteConfig` changes how
+/// every earlier blob would be read. So the old shape stays, frozen, and blobs
+/// are decoded by the version they announce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct InviteConfigV1 {
+    v: u16,
+    game_id: [u8; GAME_ID_LEN],
+    plugin_id: String,
+    plugin_version: u32,
+    dictionary_hash: Option<[u8; HASH_LEN]>,
+    initiator_pub_key: [u8; PUBKEY_LEN],
+    seed: [u8; 32],
+    created_at: u64,
+}
+
+impl From<InviteConfigV1> for InviteConfig {
+    fn from(old: InviteConfigV1) -> Self {
+        Self {
+            v: old.v,
+            game_id: old.game_id,
+            plugin_id: old.plugin_id,
+            plugin_version: old.plugin_version,
+            dictionary_hash: old.dictionary_hash,
+            initiator_pub_key: old.initiator_pub_key,
+            seed: old.seed,
+            created_at: old.created_at,
+            // Whoever made this link was using a build that had no names.
+            name: String::new(),
+        }
+    }
 }
 
 impl InviteConfig {
@@ -50,15 +106,37 @@ impl InviteConfig {
     }
 
     /// Opens a blob using the key carried in the link fragment.
+    ///
+    /// The version is read first and the rest decoded according to it, because
+    /// postcard cannot tell one shape from another by looking: decoding a v1
+    /// blob as a v2 struct does not fail cleanly, it reads whatever follows the
+    /// last field it recognises.
     pub fn open(key: &[u8; KEY_LEN], blob: &[u8]) -> Result<Self, CryptoError> {
         let plaintext = crate::seal::open(key, INVITE_AAD, blob)?;
-        let config: Self =
-            postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)?;
 
-        if config.v != INVITE_VERSION {
-            return Err(CryptoError::UnsupportedVersion(config.v));
-        }
+        let (version, _) =
+            postcard::take_from_bytes::<u16>(&plaintext).map_err(|_| CryptoError::BadEncoding)?;
+
+        let config: Self = match version {
+            INVITE_VERSION => {
+                postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)?
+            }
+            INVITE_VERSION_UNNAMED => postcard::from_bytes::<InviteConfigV1>(&plaintext)
+                .map_err(|_| CryptoError::BadEncoding)?
+                .into(),
+            other => return Err(CryptoError::UnsupportedVersion(other)),
+        };
+
         Ok(config)
+    }
+
+    /// Trims a display name to something an invite will carry.
+    ///
+    /// Applied where the name enters rather than where it is read, so a name
+    /// that is too long is shortened once instead of being refused at the far
+    /// end of a link somebody has already sent.
+    pub fn clean_name(name: &str) -> String {
+        name.trim().chars().take(MAX_NAME_LEN).collect()
     }
 
     /// Whether this build can play the game the invite describes.

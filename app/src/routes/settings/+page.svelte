@@ -10,6 +10,7 @@
   import HubRow from '$lib/components/HubRow.svelte';
   import { GLYPHS } from '$lib/components/SettingsGlyphs.ts';
   import { getMeta, listContacts } from '$lib/db/store.ts';
+  import { displayName } from '$lib/profile.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
   import { pushAvailability, type PushAvailability } from '$lib/push.ts';
@@ -18,6 +19,7 @@
   import { loadTheme, type ThemeChoice } from '$lib/theme.ts';
 
   let key = $state('');
+  let name = $state('');
   let contacts = $state<string[]>([]);
   let availability = $state<PushAvailability | null>(null);
   let theme = $state<ThemeChoice>('system');
@@ -31,6 +33,7 @@
   $effect(() => {
     void (async () => {
       key = await myPublicKey();
+      name = await displayName();
       contacts = (await listContacts()).map((contact) => contact.name);
       availability = await pushAvailability();
       theme = await loadTheme();

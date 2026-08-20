@@ -8,7 +8,7 @@
 import { fromBase64Url, toBase64Url } from '@tabla/shared';
 
 import { Deal, type DealDuty } from './deal.ts';
-import { appendEntries, loadEntries, updateGame } from './db/store.ts';
+import { appendEntries, getContact, loadEntries, renameContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { dictionaryBytes } from './dict.ts';
@@ -17,6 +17,7 @@ import { gameEntry } from './registry.ts';
 import { pluginHost } from './plugin/host.ts';
 import type { PluginOutcome } from './plugin/protocol.ts';
 import { openGameSocket } from './relay.ts';
+import { displayName, PLACEHOLDER_NAME } from './profile.ts';
 import { SyncEngine, type SyncStatus } from './sync/engine.ts';
 import type { CoreModule, Identity, Log, Session } from './wasm/core.ts';
 
@@ -91,6 +92,15 @@ export class GameSession {
     return this.game.role === 'initiator' ? 0 : 1;
   }
 
+  /**
+   * What we call ourselves, read once at open.
+   *
+   * Held rather than fetched where it is needed because the prologue is
+   * written from a synchronous path — the log has just advanced and the answer
+   * has to be ready.
+   */
+  private myName = '';
+
   private async initialize(): Promise<void> {
     // The sandbox cannot fetch anything, so the main thread supplies both the
     // rules and the word list when it asks for them. Both are checked against
@@ -101,6 +111,7 @@ export class GameSession {
     const { core, identity } = await loadIdentity();
     this.core = core;
     this.identity = identity;
+    this.myName = await displayName();
 
     if (!this.game.claimerPubKey) {
       throw new Error('the game has not been claimed yet');
@@ -277,7 +288,9 @@ export class GameSession {
     const tip = Number(this.log.tipSeq);
 
     if (tip < 0 && this.game.role === 'claimer') {
-      this.appendEntry(this.session.sealJoin(randomBytes(24), this.identity.publicKey()));
+      this.appendEntry(
+        this.session.sealJoin(randomBytes(24), this.identity.publicKey(), this.myName),
+      );
       return true;
     }
     if (tip === 0 && this.game.role === 'initiator') {
@@ -480,6 +493,11 @@ export class GameSession {
       rackCommitment: view.rackCommitment ?? null,
     };
 
+    // Sequence 0 may carry what the claimer would like to be called. The
+    // initiator has no other way to learn it: the relay never saw it, and by
+    // the time the game is active the invite is gone.
+    if (this.player === 0 && replay.claimerName) this.learnOpponentName(replay.claimerName);
+
     // A resignation ends the game even though the rules know nothing about it.
     const resignedBy = replay.resignedBy;
     const finalOutcome: PluginOutcome | null =
@@ -555,6 +573,30 @@ export class GameSession {
     }
 
     await this.notify();
+  }
+
+  /**
+   * Records what the opponent asked to be called.
+   *
+   * Fired from rendering, which happens constantly, so it does nothing once
+   * the name is already the one we hold. `rememberContact` will not overwrite
+   * an existing name either, which is what keeps a local rename from being
+   * undone by the next time the board is drawn.
+   */
+  private learnOpponentName(name: string): void {
+    const key = this.game.claimerPubKey;
+    if (!key || this.game.opponentName === name) return;
+
+    void (async () => {
+      // The contact was saved when the invite was claimed, under a placeholder,
+      // because that is the first moment their key existed and the last moment
+      // before their name could be read. Filling that in is not the same as
+      // overwriting a name someone chose: a rename is a decision, and it wins.
+      const contact = await getContact(key);
+      if (!contact || contact.name === PLACEHOLDER_NAME) await renameContact(key, name);
+
+      this.game = (await updateGame(this.game.gameId, { opponentName: name })) ?? this.game;
+    })();
   }
 
   /** Registers this device for content-free pushes about this game. */

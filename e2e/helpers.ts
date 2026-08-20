@@ -5,14 +5,38 @@ import { fileURLToPath } from 'node:url';
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 
 /**
- * Starts a game of the named kind.
+ * Gets past first run.
  *
- * There is more than one game now, so starting one is two taps: the button that
- * opens the picker, then the game itself.
+ * Every test that is not about onboarding wants a device that already has an
+ * identity, and the welcome screen stands in front of everything else until
+ * one exists.
+ */
+export async function introduce(page: Page, name = ''): Promise<void> {
+  const start = page.getByTestId('start-playing');
+  const home = page.getByRole('link', { name: 'Start a new game' });
+
+  // Wait for whichever of the two this device is going to show. Asking whether
+  // the welcome screen is present without waiting for either races the first
+  // paint, and answers "no" for a device that is about to show it.
+  await expect(start.or(home).first()).toBeVisible();
+  if (!(await start.isVisible())) return;
+
+  if (name) await page.getByTestId('display-name').fill(name);
+  await start.click();
+  await expect(home).toBeVisible();
+}
+
+/**
+ * Starts a game of the named kind, against nobody in particular.
+ *
+ * Three taps now: starting a game asks who before what, and the last step is
+ * the one that creates the invite.
  */
 export async function startGame(page: Page, game = 'tictactoe'): Promise<void> {
-  await page.getByRole('button', { name: 'Start a new game' }).click();
+  await introduce(page);
+  await page.getByRole('link', { name: 'Start a new game' }).click();
   await page.locator(`button[data-game="${game}"]`).click();
+  await page.getByRole('button', { name: /Invite|Make an invite link/ }).click();
 }
 
 /** Reads the invite link out of the share panel. */

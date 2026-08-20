@@ -11,7 +11,7 @@
  */
 import { devices, expect, test, type Browser, type Page } from '@playwright/test';
 
-import { startGame } from './helpers.ts';
+import { introduce, startGame } from './helpers.ts';
 
 /**
  * iPhone characteristics only. The full device descriptor carries
@@ -108,6 +108,8 @@ test('the app still opens with no network at all', async ({ browser }) => {
   const page = await context.newPage();
 
   await page.goto('/');
+  // A device that has been used before, which is the one that ends up offline.
+  await introduce(page, 'Ada');
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
   // A second load so the shell is served by the worker that is now in control.
   await page.reload();
@@ -115,8 +117,10 @@ test('the app still opens with no network at all', async ({ browser }) => {
   await context.setOffline(true);
   await page.reload();
 
-  // The shell is there and interactive, served entirely by the service worker.
-  await expect(page.getByRole('button', { name: 'Start a new game' })).toBeVisible();
+  // The shell is there and interactive, served entirely by the service worker,
+  // and it still knows who this device is — the identity is local, so nothing
+  // about opening the app needs the network.
+  await expect(page.getByRole('link', { name: 'Start a new game' })).toBeVisible();
 
   await context.setOffline(false);
   await context.close();

@@ -19,6 +19,16 @@ use crate::{GAME_ID_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN};
 pub enum EntryBody {
     /// Sequence 0, written by the claimer: binds their identity to the game.
     Join { claimer_pub_key: [u8; PUBKEY_LEN] },
+    /// The same, with what the claimer would like to be called.
+    ///
+    /// A separate variant rather than a field on `Join`, because postcard is
+    /// not self-describing: adding a field would change how every prologue
+    /// already written is read, and those are in games people are still
+    /// playing. A new variant leaves them exactly as they were.
+    JoinAs {
+        claimer_pub_key: [u8; PUBKEY_LEN],
+        name: String,
+    },
     /// Sequence 1, written by the initiator: the agreed game configuration.
     Setup { config: Vec<u8> },
     /// A move, opaque here and interpreted by the plugin.
@@ -155,6 +165,12 @@ pub struct ReplayedLog {
     pub resigned_by: Option<Role>,
     /// The configuration from the `Setup` entry, if the log has reached it.
     pub config: Option<Vec<u8>>,
+    /// What the claimer asked to be called, if their build sends a name.
+    ///
+    /// The initiator learns it here rather than from the relay, which never
+    /// sees it. Absent for every game begun before names existed, and for a
+    /// claimer who has not set one.
+    pub claimer_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -204,6 +220,7 @@ impl Session {
             moves: Vec::new(),
             resigned_by: None,
             config: None,
+            claimer_name: None,
         };
 
         for entry in entries {
@@ -220,13 +237,22 @@ impl Session {
             }
 
             match (&body, seq) {
-                (EntryBody::Join { claimer_pub_key }, 0) => {
+                (
+                    EntryBody::Join { claimer_pub_key }
+                    | EntryBody::JoinAs {
+                        claimer_pub_key, ..
+                    },
+                    0,
+                ) => {
                     if role != Role::Claimer {
                         return Err(SessionError::OutOfTurn { seq });
                     }
                     let bound = self.participants.key_hashes()[1];
                     if crate::log::key_hash(claimer_pub_key) != bound {
                         return Err(SessionError::JoinKeyMismatch);
+                    }
+                    if let EntryBody::JoinAs { name, .. } = &body {
+                        out.claimer_name = Some(name.clone());
                     }
                 }
                 (EntryBody::Setup { config }, 1) => {

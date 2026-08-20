@@ -15,7 +15,13 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { gameWhereMoverCanSpell, inviteLink, playWord, startGame } from './helpers.ts';
+import {
+  gameWhereMoverCanSpell,
+  introduce,
+  inviteLink,
+  playWord,
+  startGame,
+} from './helpers.ts';
 
 test.skip(!process.env.SCREENSHOTS, 'screenshot capture runs on demand, not in CI');
 
@@ -32,6 +38,13 @@ test('home: the games waiting on you, and the ones that are not', async ({ brows
 
   const a = await alice.newPage();
   const b = await bob.newPage();
+
+  // Both players say what they are called, because a list of games is mostly a
+  // list of people.
+  await a.goto('/');
+  await introduce(a, 'Josh');
+  await b.goto('/');
+  await introduce(b, 'Pooja');
 
   // A word game, played far enough that the list has something to say about it.
   await a.goto('/');

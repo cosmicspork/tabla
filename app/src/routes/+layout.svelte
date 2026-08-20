@@ -1,11 +1,40 @@
 <script lang="ts">
   import '../app.css';
 
+  import { page } from '$app/state';
+
   import AppHeader from '$lib/components/AppHeader.svelte';
+  import Welcome from '$lib/components/Welcome.svelte';
   import { captureSimulationFlag } from '$lib/lifecycle.ts';
+  import { hasOnboarded } from '$lib/profile.ts';
   import { applyTheme, loadTheme } from '$lib/theme.ts';
 
   let { children } = $props();
+
+  /**
+   * Whether first run is behind us. `null` while we are still finding out,
+   * which is a third state worth having: rendering the welcome screen for a
+   * frame to someone who has been playing for months would be alarming.
+   */
+  let onboarded = $state<boolean | null>(null);
+
+  /**
+   * The welcome screen interrupts the game list, not the app.
+   *
+   * Anywhere else, the person already knows where they were going: an invite
+   * link came to join a game, and the welcome screen's own offer of restoring
+   * a backup leads to a settings page — which it would be standing in front
+   * of, if it stood in front of everything.
+   */
+  const atHome = $derived(page.route.id === '/');
+
+  $effect(() => {
+    // Re-read on every navigation, not just at mount: redeeming an invite
+    // introduces a device from outside this component, and a stale `false`
+    // would put the welcome screen in front of the game it just joined.
+    void page.route.id;
+    void hasOnboarded().then((done) => (onboarded = done));
+  });
 
   $effect(() => {
     captureSimulationFlag();
@@ -21,11 +50,15 @@
 </script>
 
 <div class="shell">
-  <AppHeader />
+  {#if onboarded === false && atHome}
+    <Welcome onready={() => (onboarded = true)} />
+  {:else if onboarded !== null}
+    <AppHeader />
 
-  <main>
-    {@render children()}
-  </main>
+    <main>
+      {@render children()}
+    </main>
+  {/if}
 </div>
 
 <style>
