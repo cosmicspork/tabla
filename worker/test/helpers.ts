@@ -42,6 +42,10 @@ export function mailboxStub(mailboxId: string) {
   return env.MAILBOXES.get(env.MAILBOXES.idFromName(mailboxId));
 }
 
+export function linkStub(linkId: string) {
+  return env.LINKS.get(env.LINKS.idFromName(linkId));
+}
+
 export function roomStub(gameId: string) {
   return env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(gameId));
 }

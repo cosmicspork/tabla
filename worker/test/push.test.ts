@@ -154,3 +154,71 @@ describe('the 24 hour reminder', () => {
     });
   });
 });
+
+describe('a player with more than one device', () => {
+  /** A second real P-256 point, for the same person's other device. */
+  const laptop = {
+    endpoint: 'https://push.example/send/def456',
+    keys: {
+      p256dh:
+        'BFXyfmiUiJ7iUcHUeRUC3Ils8Fl2WMbP3fH1rrPQu8eBMwtb8HFdOI2yj8Fp4EBqXjLGKMd2v8yEwQ4hs4zGvwo',
+      auth: 'zqbxT6JKtdKu8FkVSVGiGw',
+    },
+  };
+
+  it('tells every device, not just whichever subscribed last', async () => {
+    // The old shape kept one subscription per participant, so a person who
+    // opened the game on a laptop silently stopped hearing about it on their
+    // phone — a failure nobody reports, because it looks like nothing.
+    const { gameId, bytes, stub } = room('push-devices-01');
+    const now = Date.now();
+
+    await stub.setPushSubscription(BOB, subscription, now);
+    await stub.setPushSubscription(BOB, laptop, now);
+
+    await stub.append(gameId, ALICE, await makeChain(bytes, 1), now);
+
+    expect((await pushStats(stub)).attempts).toBe(2);
+  });
+
+  it('retires one device without unsubscribing the other', async () => {
+    const { gameId, bytes, stub } = room('push-devices-02');
+    const now = Date.now();
+
+    await stub.setPushSubscription(BOB, subscription, now);
+    await stub.setPushSubscription(BOB, laptop, now);
+    await stub.setPushSubscription(BOB, null, now, laptop.endpoint);
+
+    await stub.append(gameId, ALICE, await makeChain(bytes, 1), now);
+
+    expect((await pushStats(stub)).attempts).toBe(1);
+  });
+
+  it('carries forward a subscription written before devices existed', async () => {
+    // Rooms already in flight have one in the old column. Left there it would
+    // simply stop receiving pushes.
+    const { gameId, bytes, stub } = room('push-devices-03');
+    const now = Date.now();
+
+    await stub.setPushSubscription(BOB, subscription, now);
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`DELETE FROM push_endpoint`);
+      state.storage.sql.exec(
+        `UPDATE participant SET push_sub = ? WHERE key_hash = ?`,
+        JSON.stringify(subscription),
+        BOB,
+      );
+    });
+
+    await stub.append(gameId, ALICE, await makeChain(bytes, 1), now);
+    expect((await pushStats(stub)).attempts).toBe(1);
+
+    // And it was moved, not copied: a second move does not push twice.
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ n: number }>(`SELECT COUNT(*) AS n FROM push_endpoint WHERE key_hash = ?`, BOB)
+        .toArray()[0];
+      expect(row.n).toBe(1);
+    });
+  });
+});

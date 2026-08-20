@@ -9,6 +9,8 @@
 import {
   BLOB_ID_LEN,
   cancelInviteRequestSchema,
+  cancelLinkRequestSchema,
+  createLinkRequestSchema,
   mailboxPushRequestSchema,
   pollMailboxRequestSchema,
   postMailboxRequestSchema,
@@ -21,6 +23,7 @@ import {
 
 import type { Env } from './env.ts';
 
+export { DeviceLinkDO } from './device-link.ts';
 export { GameRoomDO } from './game-room.ts';
 export { MailboxDO } from './mailbox.ts';
 export { PendingInviteDO } from './pending-invite.ts';
@@ -69,6 +72,19 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
       return cancelInvite(request, env, blobId);
     }
     if (!subPath && request.method === 'GET') return inviteStatus(env, blobId);
+    return json({ code: 'method_not_allowed' }, 405);
+  }
+
+  if (path === '/api/link' && request.method === 'POST') {
+    return createLink(request, env);
+  }
+
+  const linkMatch = path.match(/^\/api\/link\/([A-Za-z0-9_-]{22})(\/take|\/cancel)?$/);
+  if (linkMatch) {
+    const [, linkId, subPath] = linkMatch;
+    if (subPath === '/take' && request.method === 'POST') return takeLink(env, linkId);
+    if (subPath === '/cancel' && request.method === 'POST') return cancelLink(request, env, linkId);
+    if (!subPath && request.method === 'GET') return linkStatus(env, linkId);
     return json({ code: 'method_not_allowed' }, 405);
   }
 
@@ -183,6 +199,72 @@ async function inviteStatus(env: Env, blobId: string): Promise<Response> {
     claimerPubKey: status.claimerPubKey,
     sig: status.sig,
   });
+}
+
+// -- device links -----------------------------------------------------------
+
+/**
+ * Offers this installation to another of the same person's devices.
+ *
+ * The caller names the link, because the name is derived from the words that
+ * are also the passphrase — so the relay never learns anything that would let
+ * it find or guess what it is holding. It still mints the cancel token, which
+ * is the one secret here the client has no way to derive.
+ */
+async function createLink(request: Request, env: Env): Promise<Response> {
+  const parsed = createLinkRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const cancelToken = toBase64Url(crypto.getRandomValues(new Uint8Array(BLOB_ID_LEN)));
+  const blob = fromBase64Url(parsed.data.blob);
+
+  const stub = linkFor(env, parsed.data.linkId);
+  const result = await stub.create(
+    parsed.data.linkId,
+    toArrayBuffer(blob),
+    cancelToken,
+    Date.now(),
+  );
+
+  if (!result.ok) return json({ code: result.code }, 409);
+
+  return json({ expiresAt: result.expiresAt, cancelToken }, 201);
+}
+
+async function takeLink(env: Env, linkId: string): Promise<Response> {
+  const result = await linkFor(env, linkId).take(Date.now());
+
+  if (!result.ok) {
+    const status =
+      result.code === ErrorCode.AlreadyClaimed ? 409 : result.code === ErrorCode.Expired ? 410 : 404;
+    return json({ code: result.code }, status);
+  }
+
+  return json({ blob: result.blob });
+}
+
+async function cancelLink(request: Request, env: Env, linkId: string): Promise<Response> {
+  const parsed = cancelLinkRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const result = await linkFor(env, linkId).cancel(parsed.data.cancelToken);
+
+  if (!result.ok) {
+    return json({ code: result.code }, result.code === ErrorCode.Forbidden ? 403 : 404);
+  }
+
+  return json({ ok: true });
+}
+
+async function linkStatus(env: Env, linkId: string): Promise<Response> {
+  const status = await linkFor(env, linkId).status(Date.now());
+  if (!status.exists) return json({ code: ErrorCode.NotFound }, 404);
+
+  return json({ taken: status.taken, expiresAt: status.expiresAt });
+}
+
+function linkFor(env: Env, linkId: string) {
+  return env.LINKS.get(env.LINKS.idFromName(linkId));
 }
 
 // -- mailboxes --------------------------------------------------------------

@@ -53,7 +53,6 @@ export const BLOB_ID_LEN = 16;
 /** Relay limits. Entries larger than this are rejected by the room DO. */
 export const MAX_ENTRY_BYTES = 64 * 1024;
 
-/** Invites expire after this long with no claim. */
 /**
  * How many unread invitations one mailbox will hold.
  *
@@ -64,7 +63,37 @@ export const MAX_ENTRY_BYTES = 64 * 1024;
  */
 export const MAILBOX_MAX_PENDING = 16;
 
+/** Invites expire after this long with no claim. */
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long a device link stays open.
+ *
+ * Short on purpose. The blob is a whole installation under a passphrase two
+ * people in a room can say out loud, so the window in which it exists at all is
+ * the main thing keeping it small — and it is deleted the moment the other
+ * device takes it, which is usually seconds.
+ */
+export const LINK_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * The largest link bundle the relay will hold, before base64url.
+ *
+ * A Durable Object's SQLite values stop at 2 MB, so this leaves room for the
+ * encoding. A device with more history than this links without the logs of its
+ * oldest finished games; they are still listed, and still fetchable from their
+ * rooms if the relay has them.
+ */
+export const LINK_MAX_BYTES = 1024 * 1024;
+
+/**
+ * The longest a device may claim the next move for.
+ *
+ * Only a ceiling: a device asks for two minutes and renews while a move is
+ * being built. This stops one from asking for a week and locking your other
+ * devices out of a game.
+ */
+export const HOLD_MAX_MS = 3 * 60 * 1000;
 /** A single turn reminder is sent after this much inactivity. */
 export const TURN_REMINDER_MS = 24 * 60 * 60 * 1000;
 /** Ciphertext is evicted after this much inactivity, leaving only a tombstone. */
