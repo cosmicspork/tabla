@@ -8,7 +8,7 @@
  */
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 
-import { startGame } from './helpers.ts';
+import { introduce, startGame } from './helpers.ts';
 
 const PASSPHRASE = 'correct horse battery staple';
 
@@ -134,4 +134,58 @@ test('a backup will not open with the wrong passphrase', async ({ browser }) => 
   await alice.close();
   await bob.close();
   await other.close();
+});
+
+test('a restored device still knows what it is called', async ({ browser }) => {
+  const alice = await browser.newContext();
+  const a = await alice.newPage();
+
+  await a.goto('/');
+  await introduce(a, 'Ada');
+
+  await a.goto('/settings/backup');
+  await a.getByLabel('Passphrase').first().fill(PASSPHRASE);
+  const download = a.waitForEvent('download');
+  await a.getByRole('button', { name: 'Download backup' }).click();
+  const file = await (await download).path();
+
+  const replacement = await browser.newContext();
+  const c = await replacement.newPage();
+  await c.goto('/');
+  // A device with no identity of its own: the welcome screen offers exactly
+  // this route, and it must not ask a restored device who it is.
+  await c.getByRole('link', { name: /I have a backup/ }).click();
+  await c.locator('input[type="file"]').setInputFiles(file!);
+  await c.getByLabel('Passphrase').nth(1).fill(PASSPHRASE);
+  await c.getByRole('button', { name: 'Restore' }).click();
+  await c.getByRole('button', { name: 'Yes, replace this device' }).click();
+  await expect(c.getByText(/Restored/)).toBeVisible();
+
+  // The name came with the identity it belongs to. Without this the device
+  // would introduce itself to everyone it met next as nobody, and the person
+  // holding it would never find out — the people they had already played kept
+  // the name on their own side.
+  await c.goto('/settings/profile');
+  await expect(c.getByTestId('display-name')).toHaveValue('Ada');
+
+  // And it is the name that actually travels, not just one that is displayed.
+  const bob = await browser.newContext();
+  const b = await bob.newPage();
+  await b.goto('/');
+  await introduce(b, 'Pooja');
+
+  await c.goto('/');
+  await c.getByRole('link', { name: 'Start a new game' }).click();
+  await c.locator('button[data-game="tictactoe"]').click();
+  await c.getByRole('button', { name: /Make an invite link/ }).click();
+  await expect(c.getByTestId('status')).toContainText('Waiting for someone');
+  await b.goto(await inviteLink(c));
+
+  await expect(b.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+  await b.goto('/');
+  await expect(b.getByText('Tic tac toe with Ada')).toBeVisible();
+
+  await alice.close();
+  await replacement.close();
+  await bob.close();
 });

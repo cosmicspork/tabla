@@ -23,12 +23,7 @@ pub const INVITE_VERSION: u16 = 2;
 /// The last version that had no name in it.
 const INVITE_VERSION_UNNAMED: u16 = 1;
 
-/// The longest display name an invite will carry.
-///
-/// The blob is not padded, so its length grows with the name — a very long one
-/// would be visible to the relay as a larger blob. Thirty-two characters is
-/// more than a name needs and little enough to say nothing.
-pub const MAX_NAME_LEN: usize = 32;
+pub use crate::identity::MAX_NAME_LEN;
 
 /// Associated data for the sealed blob.
 pub const INVITE_AAD: &[u8] = b"tabla-invite/v1";
@@ -131,12 +126,8 @@ impl InviteConfig {
     }
 
     /// Trims a display name to something an invite will carry.
-    ///
-    /// Applied where the name enters rather than where it is read, so a name
-    /// that is too long is shortened once instead of being refused at the far
-    /// end of a link somebody has already sent.
     pub fn clean_name(name: &str) -> String {
-        name.trim().chars().take(MAX_NAME_LEN).collect()
+        crate::identity::clean_name(name)
     }
 
     /// Whether this build can play the game the invite describes.

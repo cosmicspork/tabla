@@ -127,6 +127,22 @@ impl core::fmt::Debug for Identity {
 }
 
 /// Parses a peer's 32-byte Ed25519 public key.
+/// The longest display name anything here will carry.
+///
+/// Nothing is padded, so a sealed blob's length grows with the name — a very
+/// long one would be visible to the relay as a larger blob. Thirty-two
+/// characters is more than a name needs and little enough to say nothing.
+pub const MAX_NAME_LEN: usize = 32;
+
+/// Trims a display name to something that can be carried.
+///
+/// Applied where a name enters rather than where it is read, so a name that is
+/// too long is shortened once instead of being refused at the far end of a link
+/// somebody has already sent.
+pub fn clean_name(name: &str) -> String {
+    name.trim().chars().take(MAX_NAME_LEN).collect()
+}
+
 pub fn parse_public_key(bytes: &[u8; PUBKEY_LEN]) -> Result<VerifyingKey, CryptoError> {
     VerifyingKey::from_bytes(bytes).map_err(|_| CryptoError::BadPublicKey)
 }
