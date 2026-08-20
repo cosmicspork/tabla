@@ -393,7 +393,13 @@ describe('devices', () => {
     const alice = new core.Identity(ALICE_SEED);
     const body = { NameChanged: 'Josh' };
 
-    const sealed = alice.sealDeviceNotice(LAPTOP, PHONE, nonce(3), 1_780_000_000n, JSON.stringify(body));
+    const sealed = alice.sealDeviceNotice(
+      LAPTOP,
+      PHONE,
+      nonce(3),
+      1_780_000_000n,
+      JSON.stringify(body),
+    );
     const opened = JSON.parse(alice.openDeviceNotice(LAPTOP, sealed));
 
     expect(opened.v).toBe(1);
