@@ -87,6 +87,23 @@ pub fn distribution() -> TileCounts {
     counts
 }
 
+/// The bag laid out in canonical order, one entry per tile.
+///
+/// Public, and computed identically on both devices, which is why the deck a
+/// game is dealt from costs nothing to establish: it is this list, encrypted
+/// trivially, and the shuffles that follow are what make it a bag. Only the
+/// order matters, and only that both sides agree on it.
+pub fn deck() -> Vec<Tile> {
+    let counts = distribution();
+    let mut tiles = Vec::with_capacity(TILE_TOTAL as usize);
+    for (kind, &count) in counts.iter().enumerate() {
+        for _ in 0..count {
+            tiles.push(kind as Tile);
+        }
+    }
+    tiles
+}
+
 /// What a tile scores. Blanks score nothing however they are read.
 pub fn value(tile: Tile) -> i32 {
     match tile {

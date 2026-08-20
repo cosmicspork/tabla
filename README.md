@@ -21,11 +21,8 @@ toe.
 
 **Phase 2 is complete**: Letras, played on an original board with a tile set
 derived from a public-domain word list. Hidden state without a trusted third
-party is the interesting part: each player draws from their own committed
-stream, and at the end of the game both open their seeds so every draw can be
-recomputed and checked. The
-[fairness tiers](ARCHITECTURE.md#fairness-tiers) section explains why the design
-differs from the one originally specified, and what it costs.
+party is the interesting part, and how it is done changed in phase 4 — see
+below.
 
 **Phase 3 is complete**: games other than tic tac toe are separate WASM modules
 rather than part of the app. Letras is fetched the first time you open one —
@@ -34,7 +31,19 @@ runs, and removable in settings, where it comes back by itself the next time you
 need it. Tic tac toe stays built in, so a fresh install with no connection can
 still play something.
 
-Phase 4 (a real-time competitive tier) has not been started.
+**Phase 4 is complete**: tiles are dealt from a single encrypted deck that
+neither player can read. Both players shuffle it, every step carries a
+zero-knowledge proof, and a tile becomes visible only when someone entitled to
+see it opens it. Playing a tile you were not dealt is impossible rather than
+detectable afterwards, and tile counting is exact. Players can also now see
+whether the other is currently on the board.
+
+This was specified as a separate real-time tier, on the reasoning that mental
+poker needs a live opponent for every draw. It turned out not to, for this game:
+Letras already makes you draw after your opponent moves, which puts an entry
+exactly where the protocol needs one. So the two tiers became one. The
+[fairness tiers](ARCHITECTURE.md#fairness-tiers) section sets out the reasoning
+and what the earlier design cost.
 
 ## Letras
 
@@ -51,17 +60,17 @@ Two rules are worth knowing before you play:
   see your next tiles before deciding how many to spend. The board tells you
   when a draw is pending.
 
-You may also notice, over a long game, the same tile appearing twice. That is
-real and it is explained in the architecture notes: it is the price of dealing
-hidden tiles between two devices with nothing trusted in between.
+There is one real bag, and the tiles in it are the tiles in it — worth saying
+because an earlier version of the game could not promise that, and games started
+under those rules are still finishing under them.
 
 ## Stack
 
 | Piece | What |
 |---|---|
 | `app/` | SvelteKit PWA (Svelte 5), built as a pure SPA with `adapter-static` |
-| `rust/` | Game rules, the hash-chained log, and all protocol crypto, compiled to WASM |
-| | — built as separate modules: the core (keys, log, crypto), the bundled game, and one per downloadable game (rules only, no crypto) |
+| `rust/` | Game rules, the hash-chained log, the tile deal, and all protocol crypto, compiled to WASM |
+| | — built as separate modules: the core (keys, log, crypto, the deal), the bundled game, and one per downloadable game version (rules only, no crypto) |
 | `worker/` | Cloudflare Worker + two Durable Objects: the relay |
 | `shared/` | Wire formats (zod) shared by the app, the Worker, and the tests |
 
@@ -110,9 +119,13 @@ signature:
 
 ```bash
 just dict           # recompile wordlist/enable.txt
-just plugins        # rebuild the downloadable game module
+just plugins        # rebuild the current downloadable game module
 just sign-manifest  # re-sign after either changes (needs the publisher key)
 ```
+
+`just plugins` builds the current version only. Older versions stay committed
+and stay listed in the manifest, because games in progress are still checking
+against those exact bytes — rebuilding one would strand them.
 
 The signing key lives in `~/.config/tabla/` and never in the repository, so CI
 verifies the committed signature and cannot produce one. If the manifest and
@@ -122,10 +135,10 @@ What the suites cover:
 
 | Suite | What it proves |
 |---|---|
-| `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift. Includes the word game's draw protocol and end-of-game audit, run from both players' points of view over one log |
+| `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift. Includes the deal: the shuffle argument against provers who duplicate, drop, or invent a tile, and the rules and the deal wired together the way the app wires them, including a player who attaches a valid proof about one tile while claiming another |
 | `worker` vitest | the relay's storage, single-use claims, retention and tombstones, and a full two-client game over real WebSockets inside workerd, including eviction and re-upload |
 | `app` vitest | that the TypeScript boundary produces the same bytes as the Rust vectors, that the relay's framing helpers agree with the core, that the committed manifest is signed by the pinned key and describes the artifacts actually committed, and that a download whose hash is wrong is refused and never stored |
-| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, and a word game played to a challenge — including restoring one mid-game and finding the rack intact, downloading the game once and no more, and removing it and getting it back |
+| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, and a word game played to a challenge — including a real deal over real proofs, restoring one mid-game and finding the rack intact, downloading the game once and no more, removing it and getting it back, and each player being told when the other arrives and leaves |
 
 ## Verifying push on a real device
 
@@ -183,11 +196,12 @@ same broken snapshot, run `just deploy` locally or dispatch the release workflow
 app/      SvelteKit PWA (SPA)
 rust/     Cargo workspace
   crates/tabla-core         canonical encoding, hash-chained log, crypto
+  crates/tabla-deal         the tile deal: threshold ElGamal, verifiable shuffle
   crates/tabla-plugin-api   the pure-function game plugin interface
   crates/tabla-dawg         the compact word list format: reader and builder
   crates/tabla-tictactoe    the game that proves the pipe
-  crates/tabla-letras       the word game: board, draws, challenges, audit
-  crates/tabla-wasm         core wasm: identity, log, sessions (holds keys)
+  crates/tabla-letras       the word game: board, tiles, and both versions' rules
+  crates/tabla-wasm         core wasm: identity, log, sessions, the deal (holds keys)
   crates/tabla-plugin-wasm  rules wasm: no keys, nothing keyed
 shared/   wire formats shared by app, worker, and tests
 wordlist/ the word list, vendored, with its provenance

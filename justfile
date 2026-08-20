@@ -57,23 +57,27 @@ dict:
 # checked against the manifest — and leaving the fallback in would make Vite
 # emit a second copy of the module into the app bundle, which is exactly what
 # downloading it is meant to avoid.
+#
+# Only the current version is built. Version 1's artifact is committed and
+# pinned, and games in progress are still playing against those exact bytes, so
+# rebuilding it would strand them for no reason.
 plugins:
     #!/usr/bin/env bash
     set -euo pipefail
     root={{justfile_directory()}}
-    out="$root/app/src/lib/wasm/letras-pkg"
+    out="$root/app/src/lib/wasm/letras2-pkg"
     cd "$root/rust/crates/tabla-plugin-wasm"
-    wasm-pack build --target web --no-pack --out-dir "$out" --out-name tabla_letras \
-        -- --no-default-features --features letras
+    wasm-pack build --target web --no-pack --out-dir "$out" --out-name tabla_letras2 \
+        -- --no-default-features --features letras-v2
     sed -i \
-        "s|module_or_path = new URL('tabla_letras_bg.wasm', import.meta.url);|throw new Error('letras module bytes must be provided by the host');|" \
-        "$out/tabla_letras.js"
-    if grep -q 'import.meta.url' "$out/tabla_letras.js"; then
+        "s|module_or_path = new URL('tabla_letras2_bg.wasm', import.meta.url);|throw new Error('letras module bytes must be provided by the host');|" \
+        "$out/tabla_letras2.js"
+    if grep -q 'import.meta.url' "$out/tabla_letras2.js"; then
         echo "the generated loader still resolves its own URL; the patch above needs updating" >&2
         exit 1
     fi
     mkdir -p "$root/app/static/plugins"
-    mv "$out/tabla_letras_bg.wasm" "$root/app/static/plugins/letras-v1.wasm"
+    mv "$out/tabla_letras2_bg.wasm" "$root/app/static/plugins/letras-v2.wasm"
     rm -f "$out/.gitignore"
 
 # Re-sign the plugin manifest after a committed artifact changes.
@@ -143,7 +147,8 @@ check-rust:
     # same crate with one game selected, so a game that only compiles alongside
     # its neighbours would break that build and nothing else would notice.
     cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features tictactoe
-    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features letras
+    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features letras-v1
+    cd rust && cargo check -p tabla-plugin-wasm --no-default-features --features letras-v2
 
 # Type-checking for the app. Needs the WASM output, so run `just build` first.
 check-ts:

@@ -1,6 +1,6 @@
 /** Reads and writes over the local database. */
 import { db } from './schema.ts';
-import type { BlobRecord, ContactRecord, EntryRecord, GameRecord } from './schema.ts';
+import type { BlobRecord, ContactRecord, DealRecord, EntryRecord, GameRecord } from './schema.ts';
 
 // -- meta -------------------------------------------------------------------
 
@@ -97,6 +97,21 @@ export async function getBlob(sha256: string): Promise<BlobRecord | undefined> {
 
 export async function putBlob(record: BlobRecord): Promise<void> {
   await (await db()).put('blobs', record);
+}
+
+/**
+ * The last verified deal for a game, if this device has one.
+ *
+ * Not authoritative: the log is. This only saves re-verifying proofs that were
+ * already accepted, and the caller throws it away if the tip it names is not
+ * the tip it is holding.
+ */
+export async function getDealSnapshot(gameId: string): Promise<DealRecord | undefined> {
+  return (await db()).get('deals', gameId);
+}
+
+export async function putDealSnapshot(record: DealRecord): Promise<void> {
+  await (await db()).put('deals', record);
 }
 
 /** Everything downloaded on behalf of one plugin. */

@@ -414,3 +414,44 @@ describe('surviving relay eviction', () => {
     expect((await room.state()).tipSeq).toBe(-1);
   });
 });
+
+describe('presence', () => {
+  it('tells each player when the other is connected, and when they leave', async () => {
+    const { alice, bob } = makeGame('sync-presence-01');
+
+    await alice.engine.connect();
+    await connected(alice);
+
+    // Alone in the room: nobody to be present.
+    expect(alice.engine.opponentPresent).toBe(false);
+
+    await bob.engine.connect();
+    await until(() => alice.engine.opponentPresent, 'Alice to see Bob arrive');
+
+    // Bob's hello tells Alice as much as it tells Bob.
+    await until(() => bob.engine.opponentPresent, 'Bob to see Alice');
+
+    bob.engine.disconnect();
+    await until(() => !alice.engine.opponentPresent, 'Alice to see Bob leave');
+
+    expect(alice.errors).toEqual([]);
+    alice.engine.disconnect();
+  });
+
+  it('is forgotten by a client whose own connection drops', async () => {
+    const { alice, bob } = makeGame('sync-presence-02');
+
+    await alice.engine.connect();
+    await bob.engine.connect();
+    await until(() => alice.engine.opponentPresent, 'Alice to see Bob arrive');
+
+    // Alice hangs up. She forgets locally rather than waiting to be told,
+    // because a closed socket is exactly the state in which no frame can
+    // arrive to correct her — and Bob is told in the ordinary way.
+    alice.engine.disconnect();
+    await until(() => !bob.engine.opponentPresent, 'Bob to be told Alice left');
+
+    expect(alice.engine.opponentPresent).toBe(false);
+    bob.engine.disconnect();
+  });
+});

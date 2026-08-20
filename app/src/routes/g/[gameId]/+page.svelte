@@ -80,13 +80,16 @@
       // does not ship a dozen boards to someone playing one of them. This lives
       // here rather than at the top of `start` because a game that began as a
       // pending invite arrives by the other path.
-      const entry = gameEntry(record.pluginId);
+      // By version: a game in progress keeps the rules it started with, and
+      // this build may carry several.
+      const entry = gameEntry(record.pluginId, record.pluginVersion);
       if (entry) Board = (await entry.board()).default;
 
       // Rules for a game the app does not carry are fetched and checked before
       // the board opens, so a player waits once, here, with an explanation —
       // rather than watching an empty board and wondering.
-      if (entry?.distribution === 'downloadable') await download(entry.id, entry.title);
+      if (entry?.distribution === 'downloadable')
+        await download(entry.id, entry.version, entry.title);
 
       const opened = await GameSession.open(record);
       session = opened;
@@ -131,13 +134,13 @@
    * precisely, because "come back when you have a signal" and "this copy of
    * tabla is not intact" call for very different things from a player.
    */
-  async function download(pluginId: string, title: string) {
-    const state = await installedState(pluginId).catch(() => null);
+  async function download(pluginId: string, version: number, title: string) {
+    const state = await installedState(pluginId, version).catch(() => null);
     if (state?.installed) return;
 
     downloading = { title, bytes: state?.totalBytes ?? 0 };
     try {
-      await installPlugin(pluginId);
+      await installPlugin(pluginId, version);
     } finally {
       downloading = null;
     }
@@ -198,7 +201,12 @@
   </p>
 {:else if board?.ready && Board}
   <h1>{titleOf(game?.pluginId ?? '')}</h1>
-  <p class="status">{statusLine}</p>
+  <p class="status">
+    {statusLine}
+    {#if board.opponentPresent && !board.outcome}
+      <span class="presence" data-present="true">Your opponent is here.</span>
+    {/if}
+  </p>
 
   <Board {board} {onplay} />
 
@@ -236,6 +244,12 @@
   .status {
     font-size: 1.05rem;
     margin-bottom: 0;
+  }
+
+  .presence {
+    font-size: 0.85rem;
+    opacity: 0.7;
+    margin-left: 0.5rem;
   }
 
   .notify {

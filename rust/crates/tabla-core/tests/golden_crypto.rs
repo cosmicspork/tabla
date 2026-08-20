@@ -44,6 +44,26 @@ fn draw_seeds_are_byte_stable_and_private_to_each_player() {
 }
 
 #[test]
+fn deal_secrets_are_byte_stable_and_private_to_each_player() {
+    // The deck is encrypted under the sum of both players' public halves. If
+    // this derivation moved, a restored device would compute a different half,
+    // and every tile it had been dealt would open to nonsense.
+    assert_eq!(hex::encode(alice().deal_secret(&GAME)), A_DEAL);
+    assert_eq!(hex::encode(bob().deal_secret(&GAME)), B_DEAL);
+
+    assert_ne!(alice().deal_secret(&GAME), bob().deal_secret(&GAME));
+    assert_ne!(alice().deal_secret(&GAME), alice().deal_secret(&BLOB));
+
+    // Distinct from the draw seed even for the same game and player. That one
+    // is published at the end of a game; this one never is, and a derivation
+    // that produced both from one tag would leak the deck.
+    assert_ne!(
+        alice().deal_secret(&GAME)[..32],
+        alice().draw_seed(&GAME)[..]
+    );
+}
+
+#[test]
 fn the_ecdh_shared_secret_is_byte_stable() {
     assert_eq!(
         hex::encode(shared_secret(&alice(), &bob().verifying_key())),
@@ -94,6 +114,14 @@ fn a_frozen_invite_blob_still_opens() {
 
 const A_DRAW: &str = "603b9525971b7038aa85f1b7ef2f3f417663c25acb08ff8b328f75dac726e549";
 const B_DRAW: &str = "89c3e94c7f40fd1bb1c05223dab174817ff8f41785746eecabadf9c149ef2cf6";
+const A_DEAL: &str = concat!(
+    "2860080d4063cda4739ef79b5ca8d6c29cd011809bd4efaa25da0c717d2304c0",
+    "210ba2d033c91daa12521958c60c5781579145675718a0ce3282389397f4692f",
+);
+const B_DEAL: &str = concat!(
+    "613c915e265dbd4bfd20b0b0cfa85a814fb7559d5a3337e5be774ea55e0d5a74",
+    "89594877a57de29a39950c80928d4ab978b4039d828ee617a6237c902fda32de",
+);
 
 const A_PUB: &str = "d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737";
 const B_PUB: &str = "a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0";

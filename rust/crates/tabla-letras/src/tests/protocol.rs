@@ -4,9 +4,9 @@ use tabla_plugin_api::{GamePlugin, PLAYER_CLAIMER, PLAYER_INITIATOR, PluginError
 
 use super::harness::*;
 use crate::board::Placement;
-use crate::draw::*;
-use crate::game::{Action, Expect, Letras, Move};
 use crate::tiles::*;
+use crate::v1::draw::*;
+use crate::v1::game::{Action, Expect, Letras, Move};
 
 /// The first `count` tiles of a rendered rack, as tile numbers.
 fn rack_tiles(rack: &str, count: usize) -> Vec<Tile> {
@@ -551,7 +551,7 @@ fn the_automatic_moves_the_view_offers_are_the_ones_the_rules_accept() {
 #[test]
 fn the_game_refuses_to_start_against_the_wrong_word_list() {
     let assets = dictionary();
-    let config = crate::game::config_for(&dictionary_hash(&assets));
+    let config = crate::v1::game::config_for(&dictionary_hash(&assets));
 
     assert!(Letras::setup(&config, &SEED_I, &assets).is_ok());
     assert_eq!(

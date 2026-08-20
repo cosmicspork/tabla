@@ -28,9 +28,11 @@ export type BoardProps = {
  * `shared` hands both players the same value from the invite, which is all a
  * game with nothing to hide needs. `draw` derives a different secret on each
  * device from its identity key, so that neither player can predict the other's
- * tiles — see `Identity.deriveDrawSeed`.
+ * tiles — see `Identity.deriveDrawSeed`. `deal` means the game's hidden state
+ * lives in an encrypted deck instead, and what this device knows about it comes
+ * from `DealSession` rather than from a seed at all.
  */
-export type SeedKind = 'shared' | 'draw';
+export type SeedKind = 'shared' | 'draw' | 'deal';
 
 /**
  * Whether a game's rules ship with the app or are fetched on first use.
@@ -69,9 +71,22 @@ const REGISTRY: GameEntry[] = [
   },
   {
     id: 'letras',
-    version: 1,
+    version: 2,
     title: 'Letras',
     blurb: 'Words on a board, a turn at a time. Downloads once, then plays offline.',
+    seed: 'deal',
+    distribution: 'downloadable',
+    dictionary: DICTIONARY_EN_V1.sha256,
+    board: () => import('./components/WordBoard.svelte'),
+  },
+  {
+    // Kept so games started under the old rules can be finished, and invites
+    // written by an older build can still be joined. Not offered for new games
+    // — see `availableGames`.
+    id: 'letras',
+    version: 1,
+    title: 'Letras',
+    blurb: 'Words on a board, a turn at a time.',
     seed: 'draw',
     distribution: 'downloadable',
     dictionary: DICTIONARY_EN_V1.sha256,
@@ -79,13 +94,40 @@ const REGISTRY: GameEntry[] = [
   },
 ];
 
-/** Every game this build offers, in the order the picker shows them. */
+/**
+ * Every game a *new* game can be started with, in picker order.
+ *
+ * One entry per plugin id: older versions stay in the registry so their games
+ * can be opened and their invites joined, but nobody starts a new game under
+ * rules that have been replaced.
+ */
 export function availableGames(): GameEntry[] {
+  const seen = new Set<string>();
+  return REGISTRY.filter((entry) => {
+    if (seen.has(entry.id)) return false;
+    seen.add(entry.id);
+    return true;
+  });
+}
+
+/** Every entry this build carries, including superseded versions. */
+export function allGames(): GameEntry[] {
   return REGISTRY;
 }
 
-/** The entry for a plugin id, or `undefined` if this build does not have it. */
-export function gameEntry(pluginId: string): GameEntry | undefined {
+/**
+ * The entry for one version of a game.
+ *
+ * A version is a different set of rules, not a setting, so this asks for both.
+ * `undefined` means this build cannot play that game at that version — which is
+ * exactly what an invite from a newer build looks like.
+ */
+export function gameEntry(pluginId: string, version: number): GameEntry | undefined {
+  return REGISTRY.find((entry) => entry.id === pluginId && entry.version === version);
+}
+
+/** The newest version of a game this build has. */
+export function latestGame(pluginId: string): GameEntry | undefined {
   return REGISTRY.find((entry) => entry.id === pluginId);
 }
 
@@ -95,5 +137,5 @@ export function gameEntry(pluginId: string): GameEntry | undefined {
  * Reachable: a backup restored from a newer build, or an invite from one.
  */
 export function titleOf(pluginId: string): string {
-  return gameEntry(pluginId)?.title ?? 'Unknown game';
+  return latestGame(pluginId)?.title ?? 'Unknown game';
 }

@@ -1,5 +1,10 @@
-/** Wire protocol version. Peers refuse to interoperate across a mismatch. */
-export const PROTOCOL_VERSION = 1;
+/**
+ * Wire protocol version. Peers refuse to interoperate across a mismatch.
+ *
+ * v2 added the `presence` frame. There is no compatibility shim for v1: the
+ * relay has never been deployed, so no client exists that speaks it.
+ */
+export const PROTOCOL_VERSION = 2;
 
 /** The game bundled into the app, so a fresh install can play without a network. */
 export const CORE_PLUGIN_ID = 'tictactoe';

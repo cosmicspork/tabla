@@ -354,6 +354,8 @@ export class GameRoomDO extends DurableObject<Env> {
       tipHash: state.tipHash,
       tombstone: state.tombstone,
     });
+
+    this.broadcastPresence();
   }
 
   private async onAppend(
@@ -392,10 +394,39 @@ export class GameRoomDO extends DurableObject<Env> {
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
     // 1006 is never a legal close code to send back.
     ws.close(code === 1006 ? 1000 : code, reason);
+    this.broadcastPresence(ws);
   }
 
-  async webSocketError(): Promise<void> {
+  async webSocketError(ws: WebSocket): Promise<void> {
     // Nothing to clean up: all durable state is in SQLite, not in the socket.
+    // The one thing worth saying is that this connection is gone.
+    this.broadcastPresence(ws);
+  }
+
+  /**
+   * Tells each participant how many *other* participants are connected.
+   *
+   * Counted per recipient rather than broadcast as one number, because a
+   * player with two devices open should not be told they have company. Sockets
+   * that have not said hello are neither counted nor told: without a key hash
+   * there is no way to know whose they are.
+   *
+   * `departing` is the socket being closed, which the runtime still lists while
+   * the close handler runs.
+   */
+  private broadcastPresence(departing?: WebSocket): void {
+    const live = this.ctx
+      .getWebSockets()
+      .filter((socket) => socket !== departing)
+      .map((socket) => ({ socket, keyHash: this.attachmentOf(socket).keyHash }))
+      .filter((entry) => entry.keyHash !== null);
+
+    for (const { socket, keyHash } of live) {
+      const others = new Set(
+        live.filter((other) => other.keyHash !== keyHash).map((other) => other.keyHash),
+      );
+      this.send(socket, { t: 'presence', others: others.size });
+    }
   }
 
   private send(ws: WebSocket, message: ServerMessage): void {

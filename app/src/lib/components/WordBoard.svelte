@@ -34,8 +34,6 @@
   );
   const audit = $derived(board.view.audit as { ok: boolean[]; notes: (string | null)[] } | null);
 
-  /** The protocol move the rules want submitted without troubling the player. */
-  const auto = $derived(board.view.auto as unknown);
   const rackCommitment = $derived(board.view.rackCommitment as number[] | null);
   /**
    * The keystream for our next exchange, from the rules.
@@ -45,6 +43,16 @@
    * will pick — so they hand over the keystream and we XOR our own choice.
    */
   const exchangeMask = $derived((board.view.exchangeMask ?? []) as number[]);
+
+  /**
+   * Where in the deck each rack tile came from, under the current rules.
+   *
+   * A tile is named by its position when it is played, because that is what
+   * the deal understands and what the opening will refer to. Empty under the
+   * older rules, which had no deck to point into.
+   */
+  const rackPositions = $derived((board.view.rackPositions ?? []) as number[]);
+  const dealt = $derived(rackPositions.length > 0);
 
   /** Tiles placed this turn but not yet played: `cell -> rack index`. */
   let pending = $state<Map<number, number>>(new Map());
@@ -133,6 +141,7 @@
   /** Turns the staged tiles into the placements the rules expect. */
   function placements() {
     return [...pending.entries()].map(([cell, index]) => ({
+      ...(dealt ? { position: rackPositions[index] } : {}),
       row: Math.floor(cell / SIZE),
       col: cell % SIZE,
       tile: rack[index] === '?' ? 0 : rack.charCodeAt(index) - 96,
@@ -141,21 +150,17 @@
   }
 
   /**
-   * Every move goes out the same way: a fresh nonce from the system generator,
-   * whatever rack commitment the rules say is owed, and the action.
+   * Hands an action to the session, which wraps it in whatever else these
+   * rules want carried — a deal payload, or a nonce and a commitment.
    *
-   * The nonce has to be real randomness — it keys the opponent's next draw, and
-   * anything predictable would hand them their tiles in advance.
+   * That bookkeeping lives there rather than here because it differs by
+   * version, and a board that had to know would need rewriting for each.
    */
   async function submit(action: unknown) {
     if (busy) return;
     busy = true;
     try {
-      await onplay({
-        nonce: [...crypto.getRandomValues(new Uint8Array(24))],
-        rackCommitment,
-        action,
-      });
+      await onplay(action);
       recall();
       exchanging = false;
       discards = new Set();
@@ -186,30 +191,32 @@
     const tiles = [...discards]
       .map((i) => (rack[i] === '?' ? 0 : rack.charCodeAt(i) - 96))
       .sort((a, b) => a - b);
-    const masked = tiles.map((tile, i) => tile ^ (exchangeMask[i] ?? 0));
+    if (dealt) {
+      // Under the current rules the positions go back in the clear: what was
+      // in them stays hidden, because they return to a deck nobody can read.
+      void submit({ exchange: { returned: [...discards].map((i) => rackPositions[i]) } });
+      return;
+    }
 
+    const masked = tiles.map((tile, i) => tile ^ (exchangeMask[i] ?? 0));
     void submit({ exchange: { masked } });
   }
 
   /**
-   * Commitments, the toss, forfeits and the final reveal are protocol rather
-   * than play. The rules work out what has to be said; the client says it.
+   * What the game is doing while it is not waiting for the player.
    *
-   * Each of these happens exactly once in a game, so remembering the last one
-   * sent is enough to stop a re-render submitting it twice while the log
-   * catches up. A duplicate would be rejected by the rules anyway, but it would
-   * surface to the player as an error about a move they never made.
+   * Key shares, shuffles and dealing are protocol rather than play, and the
+   * session submits them on its own. Naming them is worth doing: a shuffle of
+   * a hundred tiles takes a moment on a phone, and an unexplained pause reads
+   * as something being broken.
    */
-  let lastAuto = $state<string | null>(null);
-
-  $effect(() => {
-    if (!auto || !yourTurn || busy) return;
-
-    const signature = JSON.stringify(auto);
-    if (signature === lastAuto) return;
-
-    lastAuto = signature;
-    void submit(auto);
+  const ceremony = $derived.by(() => {
+    if (phase === 'key' || phase === 'shuffle') {
+      return yourTurn ? 'Shuffling the bag…' : 'Waiting for your opponent to shuffle…';
+    }
+    if (phase === 'deal') return yourTurn ? 'Dealing…' : 'Waiting to be dealt…';
+    if (phase === 'open') return yourTurn ? 'Opening your rack…' : 'Waiting for their rack…';
+    return null;
   });
 
   const canPlay = $derived(yourTurn && phase === 'play' && pending.size > 0 && assigning === null);
@@ -221,6 +228,10 @@
     <span class="muted">{bag} in the bag</span>
     <span>Them {finalScores ? finalScores[1 - you] : scores[1 - you]}</span>
   </div>
+
+  {#if ceremony}
+    <p class="ceremony" data-ceremony={phase}>{ceremony}</p>
+  {/if}
 
   <div class="word-board" class:waiting={!yourTurn}>
     {#each Array(225) as _, cell (cell)}
@@ -331,6 +342,13 @@
   .letras {
     display: grid;
     gap: 0.75rem;
+  }
+
+  .ceremony {
+    text-align: center;
+    font-size: 0.9rem;
+    opacity: 0.75;
+    margin: 0.4rem 0 0;
   }
 
   .scoreline {

@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/** The version under test. Older ones stay in the manifest for games in progress. */
+const LETRAS_VERSION = 2;
+
 import { blobsForPlugin } from '../db/store.ts';
 import { closeDatabase } from '../db/schema.ts';
 import {
@@ -31,17 +34,29 @@ import { loadCoreFromDisk } from '../wasm/node.ts';
 await loadCoreFromDisk();
 
 const manifest = await verifiedManifest();
-const letras = manifest.plugins.find((plugin) => plugin.id === 'letras')!;
+// The current version. Older ones are still in the manifest so games in
+// progress can be finished; these tests are about the one new games use.
+const letras = manifest.plugins.find(
+  (plugin) => plugin.id === 'letras' && plugin.version === LETRAS_VERSION,
+)!;
 
-/** The real committed files, so the hashes under test are the real ones. */
+/**
+ * The real committed files, so the hashes under test are the real ones.
+ *
+ * Every version the manifest lists, not just the current one — older modules
+ * are still served, because games in progress are still fetching them.
+ */
 const files = new Map<string, Uint8Array>();
-for (const file of [letras.module, ...letras.assets]) {
-  files.set(
-    file.path,
-    new Uint8Array(
-      await readFile(fileURLToPath(new URL(`../../../static${file.path}`, import.meta.url))),
-    ),
-  );
+for (const plugin of manifest.plugins) {
+  for (const file of [plugin.module, ...plugin.assets]) {
+    if (files.has(file.path)) continue;
+    files.set(
+      file.path,
+      new Uint8Array(
+        await readFile(fileURLToPath(new URL(`../../../static${file.path}`, import.meta.url))),
+      ),
+    );
+  }
 }
 
 let served: (path: string) => Response;
@@ -85,19 +100,23 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('downloading a game', () => {
   it('fetches the module once and keeps it', async () => {
-    const bytes = await pluginBytes('letras');
+    const bytes = await pluginBytes('letras', LETRAS_VERSION);
 
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(letras.module.sha256);
     expect(requests).toEqual([letras.module.path]);
 
     // A second page, with nothing in memory: the stored copy answers instead.
     forgetInstalled();
-    expect((await pluginBytes('letras')).byteLength).toBe(letras.module.bytes);
+    expect((await pluginBytes('letras', LETRAS_VERSION)).byteLength).toBe(letras.module.bytes);
     expect(requests).toEqual([letras.module.path]);
   });
 
   it('makes one request when several callers ask at once', async () => {
-    await Promise.all([pluginBytes('letras'), pluginBytes('letras'), pluginBytes('letras')]);
+    await Promise.all([
+      pluginBytes('letras', LETRAS_VERSION),
+      pluginBytes('letras', LETRAS_VERSION),
+      pluginBytes('letras', LETRAS_VERSION),
+    ]);
 
     expect(requests).toEqual([letras.module.path]);
   });
@@ -115,7 +134,7 @@ describe('downloading a game', () => {
   });
 
   it('refuses a game this build does not offer', async () => {
-    await expect(pluginBytes('chess')).rejects.toMatchObject({ kind: 'unknown' });
+    await expect(pluginBytes('chess', 1)).rejects.toMatchObject({ kind: 'unknown' });
     expect(requests).toEqual([]);
   });
 });
@@ -124,8 +143,8 @@ describe('a download that is not what was promised', () => {
   it('refuses bytes that hash to something else, and stores nothing', async () => {
     served = () => new Response(new Uint8Array([1, 2, 3]).buffer, { status: 200 });
 
-    await expect(pluginBytes('letras')).rejects.toMatchObject({ kind: 'corrupt' });
-    expect(await blobsForPlugin('letras')).toEqual([]);
+    await expect(pluginBytes('letras', LETRAS_VERSION)).rejects.toMatchObject({ kind: 'corrupt' });
+    expect(await blobsForPlugin(`letras@${LETRAS_VERSION}`)).toEqual([]);
   });
 
   it('refuses the single-page fallback, which answers 200 for anything', async () => {
@@ -135,7 +154,7 @@ describe('a download that is not what was promised', () => {
     // sandbox instead of an honest one here.
     served = () => new Response('<!doctype html><title>tabla</title>', { status: 200 });
 
-    await expect(pluginBytes('letras')).rejects.toMatchObject({ kind: 'corrupt' });
+    await expect(pluginBytes('letras', LETRAS_VERSION)).rejects.toMatchObject({ kind: 'corrupt' });
   });
 
   it('reports a network failure as something waiting will fix', async () => {
@@ -143,13 +162,13 @@ describe('a download that is not what was promised', () => {
       throw new TypeError('Failed to fetch');
     };
 
-    await expect(pluginBytes('letras')).rejects.toMatchObject({ kind: 'offline' });
+    await expect(pluginBytes('letras', LETRAS_VERSION)).rejects.toMatchObject({ kind: 'offline' });
   });
 
   it('reports a missing file the same way', async () => {
     served = () => new Response('gone', { status: 404 });
 
-    await expect(pluginBytes('letras')).rejects.toMatchObject({ kind: 'offline' });
+    await expect(pluginBytes('letras', LETRAS_VERSION)).rejects.toMatchObject({ kind: 'offline' });
   });
 });
 
@@ -165,7 +184,9 @@ describe('a manifest this build will not trust', () => {
     });
 
     const install = await import('./install.ts');
-    await expect(install.pluginBytes('letras')).rejects.toMatchObject({ kind: 'tampered' });
+    await expect(install.pluginBytes('letras', LETRAS_VERSION)).rejects.toMatchObject({
+      kind: 'tampered',
+    });
 
     // The point of verifying first: an unsigned manifest cannot even name a
     // URL to go and ask for.
@@ -176,37 +197,57 @@ describe('a manifest this build will not trust', () => {
 
 describe('what a device is holding', () => {
   it('reports nothing before, and everything after', async () => {
-    const before = await installedState('letras');
+    const before = await installedState('letras', LETRAS_VERSION);
     expect(before).toMatchObject({ installed: false, storedBytes: 0 });
     expect(before.totalBytes).toBe(
       letras.module.bytes + letras.assets.reduce((sum, asset) => sum + asset.bytes, 0),
     );
 
-    await installPlugin('letras');
+    await installPlugin('letras', LETRAS_VERSION);
 
-    const after = await installedState('letras');
+    const after = await installedState('letras', LETRAS_VERSION);
     expect(after.installed).toBe(true);
     expect(after.storedBytes).toBe(after.totalBytes);
   });
 
   it('gives the space back when a game is removed, and can fetch it again', async () => {
-    await installPlugin('letras');
-    await removePlugin('letras');
+    await installPlugin('letras', LETRAS_VERSION);
+    await removePlugin('letras', LETRAS_VERSION);
 
-    expect(await blobsForPlugin('letras')).toEqual([]);
-    expect(await installedState('letras')).toMatchObject({ installed: false, storedBytes: 0 });
+    expect(await blobsForPlugin(`letras@${LETRAS_VERSION}`)).toEqual([]);
+    expect(await installedState('letras', LETRAS_VERSION)).toMatchObject({
+      installed: false,
+      storedBytes: 0,
+    });
 
     // Removal is not a decision a player has to be sure about.
     requests = [];
     forgetInstalled();
-    await installPlugin('letras');
+    await installPlugin('letras', LETRAS_VERSION);
 
     expect(requests).toHaveLength(1 + letras.assets.length);
-    expect(await installedState('letras')).toMatchObject({ installed: true });
+    expect(await installedState('letras', LETRAS_VERSION)).toMatchObject({ installed: true });
+  });
+
+  it('keeps two versions of one game apart', async () => {
+    // Both versions ship, because a game keeps the rules it started with. Their
+    // modules are different downloads; their word list is the same bytes under
+    // both, and removing one version must not take it from the other.
+    await installPlugin('letras', 1);
+    await installPlugin('letras', 2);
+
+    expect(await installedState('letras', 1)).toMatchObject({ installed: true });
+    expect(await installedState('letras', 2)).toMatchObject({ installed: true });
+
+    await removePlugin('letras', 1);
+
+    expect(await installedState('letras', 1)).toMatchObject({ installed: false });
+    // Still whole: the shared word list stayed because version 2 still needs it.
+    expect(await installedState('letras', 2)).toMatchObject({ installed: true });
   });
 
   it('re-downloads a file the device dropped, which is what eviction looks like', async () => {
-    await installPlugin('letras');
+    await installPlugin('letras', LETRAS_VERSION);
 
     // iOS may evict storage for an app nobody has opened in a week. To this
     // code that is indistinguishable from never having downloaded it.
@@ -214,7 +255,7 @@ describe('what a device is holding', () => {
     forgetInstalled();
     requests = [];
 
-    expect((await pluginBytes('letras')).byteLength).toBe(letras.module.bytes);
+    expect((await pluginBytes('letras', LETRAS_VERSION)).byteLength).toBe(letras.module.bytes);
     expect(requests).toEqual([letras.module.path]);
   });
 });
@@ -222,6 +263,6 @@ describe('what a device is holding', () => {
 describe('InstallError', () => {
   it('is thrown, not returned, so a caller cannot ignore it', async () => {
     served = () => new Response('gone', { status: 404 });
-    await expect(pluginBytes('letras')).rejects.toBeInstanceOf(InstallError);
+    await expect(pluginBytes('letras', LETRAS_VERSION)).rejects.toBeInstanceOf(InstallError);
   });
 });

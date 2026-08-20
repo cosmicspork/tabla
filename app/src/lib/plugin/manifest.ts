@@ -89,9 +89,12 @@ async function verify(): Promise<PluginManifest> {
 }
 
 /** What the manifest says about one plugin, or nothing if it lists no such id. */
-export async function manifestEntry(pluginId: string): Promise<ManifestPlugin | undefined> {
+export async function manifestEntry(
+  pluginId: string,
+  version: number,
+): Promise<ManifestPlugin | undefined> {
   const manifest = await verifiedManifest();
-  return manifest.plugins.find((plugin) => plugin.id === pluginId);
+  return manifest.plugins.find((plugin) => plugin.id === pluginId && plugin.version === version);
 }
 
 function encode(text: string): Uint8Array {

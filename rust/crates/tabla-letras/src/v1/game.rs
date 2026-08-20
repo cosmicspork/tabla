@@ -30,10 +30,10 @@ use tabla_plugin_api::{
 
 use tabla_dawg::Dawg;
 
-use crate::audit::{Verdict, audit};
 use crate::board::*;
-use crate::draw::*;
 use crate::tiles::*;
+use crate::v1::audit::{Verdict, audit};
+use crate::v1::draw::*;
 
 /// Leading byte of the configuration blob, so its shape can change later.
 pub const CONFIG_VERSION: u8 = 1;
@@ -492,8 +492,14 @@ impl GamePlugin for Letras {
     type Move = Move;
     type View = View;
 
-    fn setup(config: &[u8], seed: &[u8; 32], assets: &[u8]) -> Result<State, PluginError> {
+    fn setup(config: &[u8], private: &[u8], assets: &[u8]) -> Result<State, PluginError> {
         let dictionary = parse_config(config)?;
+
+        // These rules derive every draw from one 32-byte secret. The private
+        // channel is wider than that now, because the version that replaced
+        // these rules puts opened tile values through it; anything else here is
+        // a host that has muddled its versions.
+        let seed: &[u8; 32] = private.try_into().map_err(|_| PluginError::BadState)?;
 
         // The word list is what the two players agreed to when the invite was
         // made. Checking it here rather than trusting the host is the point:

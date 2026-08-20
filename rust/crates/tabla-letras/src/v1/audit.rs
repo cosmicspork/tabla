@@ -17,9 +17,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::draw::{Hash, draw, mask_tiles, rack_commitment, seed_commitment};
-use crate::game::{Event, Revealed};
 use crate::tiles::{KINDS, Tile, TileCounts, contains_all, distribution};
+use crate::v1::draw::{Hash, draw, mask_tiles, rack_commitment, seed_commitment};
+use crate::v1::game::{Event, Revealed};
 use tabla_plugin_api::PlayerId;
 
 /// What went wrong, if anything did.

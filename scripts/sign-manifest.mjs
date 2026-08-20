@@ -33,6 +33,15 @@ const DOMAIN = 'tabla-manifest/v1';
 const CONTENTS = [
   {
     id: 'letras',
+    version: 2,
+    module: 'app/static/plugins/letras-v2.wasm',
+    assets: [{ id: 'en-v1', file: 'app/static/dict/en-v1.dawg' }],
+  },
+  {
+    // Still listed so a game started under the old rules can still fetch them.
+    // Its module is never rebuilt — the bytes below are the ones those games
+    // are already playing against.
+    id: 'letras',
     version: 1,
     module: 'app/static/plugins/letras-v1.wasm',
     assets: [{ id: 'en-v1', file: 'app/static/dict/en-v1.dawg' }],

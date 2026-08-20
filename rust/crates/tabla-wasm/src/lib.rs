@@ -9,6 +9,8 @@
 //! `crypto.getRandomValues`, which keeps this module deterministic and means the
 //! wasm build carries no RNG shim.
 
+pub mod deal;
+
 use tabla_core::error::CryptoError;
 use tabla_core::export::{ExportBundle, KdfParams};
 use tabla_core::identity::parse_public_key;
@@ -100,6 +102,16 @@ impl Identity {
     pub fn derive_draw_seed(&self, game_id: &[u8]) -> Result<Vec<u8>, JsError> {
         let game_id = fixed::<GAME_ID_LEN>(game_id, "gameId")?;
         Ok(self.inner.draw_seed(&game_id).to_vec())
+    }
+
+    /// This device's half of the key one game's deck is encrypted under.
+    ///
+    /// Never published, never stored — see [`tabla_core::identity::Identity`].
+    /// Held only long enough to build a [`DealSession`].
+    #[wasm_bindgen(js_name = deriveDealSecret)]
+    pub fn derive_deal_secret(&self, game_id: &[u8]) -> Result<Vec<u8>, JsError> {
+        let game_id = fixed::<GAME_ID_LEN>(game_id, "gameId")?;
+        Ok(self.inner.deal_secret(&game_id).to_vec())
     }
 
     /// Derives the symmetric key protecting one game's entries.
