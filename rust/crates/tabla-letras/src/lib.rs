@@ -26,9 +26,10 @@ pub mod board;
 pub mod tiles;
 pub mod v1;
 pub mod v2;
+pub mod v3;
 
 /// The current rules. New games use these.
-pub use v2::{Action, Letras, Move, State, config_for};
+pub use v3::{Action, Letras, Move, State, config_for};
 
 /// The byte-level plugin the registry and the WASM boundary use.
 pub type Plugin = tabla_plugin_api::Adapter<Letras>;

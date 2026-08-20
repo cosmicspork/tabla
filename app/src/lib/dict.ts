@@ -9,7 +9,7 @@
  * one they need cannot be had.
  *
  * The pin is not a formality. A client playing against a different word list
- * would disagree with its opponent about whether a challenged word is real,
+ * would disagree with its opponent about whether a played word is real,
  * and there is no recovering from that once a game is under way.
  */
 import { assetBytes, InstallError } from './plugin/install.ts';

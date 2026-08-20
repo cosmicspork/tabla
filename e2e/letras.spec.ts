@@ -40,46 +40,50 @@ test('two players play a word through the relay', async ({ browser }) => {
   await two.close();
 });
 
-test('a word that is not a word can be challenged off the board', async ({ browser }) => {
-  const { one, two, mover, other: challenger, indices } = await gameWhereMoverCanSpell(
-    browser,
-    false,
-  );
+test('a word that is not a word is refused, and the tiles stay put', async ({ browser }) => {
+  const { one, two, mover, other, indices } = await gameWhereMoverCanSpell(browser, false);
 
   await playWord(mover, indices);
-  await expect(challenger.locator('.square.filled')).toHaveCount(indices.length, {
-    timeout: 30_000,
-  });
 
-  await challenger.getByRole('button', { name: 'Challenge' }).click();
+  // Refused by the rules, so it was never sealed into the log — the opponent
+  // has nothing to see and nothing to dispute.
+  await expect(mover.getByText(/is not in the word list/)).toBeVisible({ timeout: 30_000 });
+  await expect(other.locator('.square.filled')).toHaveCount(0);
 
-  // The play comes back off both boards, and the challenger keeps the turn.
-  await expect(mover.locator('.square.filled')).toHaveCount(0, { timeout: 30_000 });
-  await expect(challenger.locator('.square.filled')).toHaveCount(0, { timeout: 30_000 });
-  await expect(challenger.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
+  // And the tiles are still where they were put, so one letter can be changed
+  // rather than the whole word laid out again.
+  await expect(mover.locator('.square.filled')).toHaveCount(indices.length);
+  await expect(mover.getByText('Your turn.')).toBeVisible();
 
   await one.close();
   await two.close();
 });
 
-test('a real word survives a challenge and costs the challenger their turn', async ({
-  browser,
-}) => {
-  const { one, two, mover, other: challenger, indices } = await gameWhereMoverCanSpell(
-    browser,
-    true,
-  );
+test('the refusal names the word that was the problem', async ({ browser }) => {
+  const { one, two, mover, indices, word } = await gameWhereMoverCanSpell(browser, false);
 
   await playWord(mover, indices);
-  await expect(challenger.locator('.square.filled')).toHaveCount(indices.length, {
+
+  // A play can make several words; saying which one leaves a player something
+  // to act on.
+  await expect(mover.getByText(new RegExp(`${word.toUpperCase()} is not in the word list`))).toBeVisible({
     timeout: 30_000,
   });
 
-  await challenger.getByRole('button', { name: 'Challenge' }).click();
+  await one.close();
+  await two.close();
+});
 
-  // The tiles stay, and the turn comes back round to the player who placed them.
-  await expect(challenger.locator('.square.filled')).toHaveCount(indices.length);
-  await expect(mover.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
+test('a real word is taken without anyone having to vouch for it', async ({ browser }) => {
+  const { one, two, mover, other, indices } = await gameWhereMoverCanSpell(browser, true);
+
+  await playWord(mover, indices);
+
+  // Both devices checked the same list against the same play and agreed, which
+  // is what the challenge used to be for.
+  await expect(other.locator('.square.filled')).toHaveCount(indices.length, { timeout: 30_000 });
+  await expect(other.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
+  await expect(other.getByRole('button', { name: 'Challenge' })).toBeHidden();
 
   await one.close();
   await two.close();

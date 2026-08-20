@@ -38,7 +38,10 @@ pub enum Outcome {
     Draw,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Not `Copy`: one variant names the word it is complaining about, and a
+/// fifteen-letter inline buffer to preserve `Copy` would be a worse trade than
+/// cloning an error on the rare path that produces one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum PluginError {
     /// The setup configuration was not understood.
@@ -54,6 +57,13 @@ pub enum PluginError {
     NotYourTurn,
     /// The move decoded but breaks the game's rules.
     IllegalMove { reason: &'static str },
+    /// A play made something that is not in the word list.
+    ///
+    /// Its own variant rather than an `IllegalMove` because it names the
+    /// offending word, and because it is the one rejection a player is expected
+    /// to meet in normal play — every other one means they did something the
+    /// board does not allow.
+    NotAWord { word: String },
     /// A move was submitted after the game ended.
     GameOver,
     /// The view could not be rendered as JSON.
@@ -69,6 +79,8 @@ impl core::fmt::Display for PluginError {
             Self::BadMove => f.write_str("move could not be decoded"),
             Self::NotYourTurn => f.write_str("not your turn"),
             Self::IllegalMove { reason } => write!(f, "illegal move: {reason}"),
+            // No prefix: this one is shown to a player as it is.
+            Self::NotAWord { word } => write!(f, "{word} is not in the word list"),
             Self::GameOver => f.write_str("the game is already over"),
             Self::BadView => f.write_str("could not render player view"),
         }

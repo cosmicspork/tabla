@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /** The version under test. Older ones stay in the manifest for games in progress. */
-const LETRAS_VERSION = 2;
+const LETRAS_VERSION = 3;
 
 import { blobsForPlugin } from '../db/store.ts';
 import { closeDatabase } from '../db/schema.ts';

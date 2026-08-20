@@ -12,7 +12,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { inviteLink, startGame } from './helpers.ts';
 
 /** The rules a new game gets. Older versions stay served for games in progress. */
-const MODULE = '/plugins/letras-v2.wasm';
+const MODULE = '/plugins/letras-v3.wasm';
 const DICTIONARY = '/dict/en-v1.dawg';
 
 /** Every plugin file this page has asked the network for. */

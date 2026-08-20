@@ -163,13 +163,22 @@
     }
   }
 
-  async function onplay(move: unknown) {
+  /**
+   * Plays a move, and says whether it was taken.
+   *
+   * The answer matters to the board: a rejected play leaves its tiles where the
+   * player put them, so a word the rules would not accept can be corrected
+   * rather than laid out again.
+   */
+  async function onplay(move: unknown): Promise<boolean> {
     try {
       await session?.play(move);
+      return true;
     } catch (error) {
       // Rejected by the rules, so it was never written to the log.
       failure = error instanceof Error ? error.message : String(error);
-      setTimeout(() => (failure = null), 2500);
+      setTimeout(() => (failure = null), 4000);
+      return false;
     }
   }
 

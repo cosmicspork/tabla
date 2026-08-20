@@ -621,7 +621,7 @@ export class GameSession {
 function assetHashOf(config: Uint8Array): string | undefined {
   // Any config version this build knows: the first byte names the rules'
   // format, and every one of them so far is a hash in the same place.
-  if (config.length !== 33 || config[0] < 1 || config[0] > 2) return undefined;
+  if (config.length !== 33 || config[0] < 1 || config[0] > 3) return undefined;
 
   return [...config.slice(1)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

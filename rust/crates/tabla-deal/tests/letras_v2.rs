@@ -25,6 +25,21 @@
 //! Skip step 2 and a player can name any tile they like while attaching a
 //! perfectly valid payload about a different one. The last test here is that
 //! attack, and it is caught by the host rather than by either half alone.
+//!
+//! ## Why this stays on version 2
+//!
+//! The seam is the deal's payload against the rules' `validate_move` /
+//! `apply_move` contract, and version 3 does not change it — what it changes is
+//! that a play also has to be a word. That check fights this fixture rather
+//! than exercising it: the deck here is really shuffled, so what it deals
+//! spells nothing, and a test would have to iteratively discover its own
+//! vocabulary before it could place a single tile.
+//!
+//! Version 3 against a real deck is covered where it is natural rather than
+//! contrived: `e2e/letras.spec.ts` plays it in a browser with the real word
+//! list, searching the rack for something spellable exactly as a person would.
+//! Version 2's rules are frozen and its artifact is committed, so this file
+//! also keeps guarding the games still being played under them.
 
 use tabla_deal::{KeyShare, state::DealState};
 use tabla_letras::tiles::{TILE_TOTAL, Tile, distribution};

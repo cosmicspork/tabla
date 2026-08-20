@@ -39,3 +39,4 @@ tictactoe = ["dep:tabla-tictactoe"]
 # hash-pinned, so in practice it is never rebuilt.
 letras-v1 = ["dep:tabla-letras"]
 letras-v2 = ["dep:tabla-letras"]
+letras-v3 = ["dep:tabla-letras"]

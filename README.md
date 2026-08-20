@@ -10,11 +10,10 @@ itself with ads and data harvesting.
 game, send the link to one person, and play at whatever pace suits you both.
 
 <p align="center">
-  <img src="docs/screenshots/home.png" width="19%" alt="Home: games sorted by who has to move next">
-  <img src="docs/screenshots/invite.png" width="19%" alt="Invite: one link, good once, with the key in the fragment">
-  <img src="docs/screenshots/letras.png" width="19%" alt="Letras: a word scored on the board, a rack only this device can read">
-  <img src="docs/screenshots/challenge.png" width="19%" alt="Challenge: the opponent decides whether that was a word">
-  <img src="docs/screenshots/games.png" width="19%" alt="Settings: which game modules this device is holding, and how to remove them">
+  <img src="docs/screenshots/home.png" width="24%" alt="Home: games sorted by who has to move next">
+  <img src="docs/screenshots/invite.png" width="24%" alt="Invite: one link, good once, with the key in the fragment">
+  <img src="docs/screenshots/letras.png" width="24%" alt="Letras: a word scored on the board, a rack only this device can read">
+  <img src="docs/screenshots/games.png" width="24%" alt="Settings: which game modules this device is holding, and how to remove them">
 </p>
 <p align="center"><sub>Real games, dealt by the real protocol — regenerate with
 <code>just screenshots</code>.</sub></p>
@@ -54,6 +53,11 @@ runs, and removable in settings, where it comes back by itself the next time you
 need it. Tic tac toe stays built in, so a fresh install with no connection can
 still play something.
 
+**Phase 5 is complete**: words are checked against the list as they are played.
+Both devices already hold the identical list, pinned by hash in the invite, so
+the answer cannot differ between them — which is what made the challenge
+unnecessary. See [Letras](#letras).
+
 **Phase 4 is complete**: tiles are dealt from a single encrypted deck that
 neither player can read. Both players shuffle it, every step carries a
 zero-knowledge proof, and a tile becomes visible only when someone entitled to
@@ -76,9 +80,10 @@ distribution and the point values are original; the word list is
 
 Two rules are worth knowing before you play:
 
-- **Words are not checked when you play them.** If you think one is not real,
-  challenge it — and lose your turn if it is. This is the tournament rule, and
-  it is what leaves room for bluffing.
+- **Words are checked as you play them.** A play that makes something outside
+  the word list is refused, and says which word was the problem; your tiles stay
+  where you put them so you can fix it. Games begun before this change finish
+  under the older rule, where a word stood until the opponent challenged it.
 - **You draw after your opponent moves, not when you play.** Otherwise you would
   see your next tiles before deciding how many to spend. The board tells you
   when a draw is pending.

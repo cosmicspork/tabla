@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { loadCore, type CoreModule } from './core.ts';
 import { loadLetras } from './letras.ts';
 import { loadLetras2 } from './letras2.ts';
+import { loadLetras3 } from './letras3.ts';
 import { loadPlugin, type PluginModule } from './plugin.ts';
 
 function resolve(relative: string): string {
@@ -44,6 +45,10 @@ export function letras2WasmPath(): string {
   return resolve('../../../static/plugins/letras-v2.wasm');
 }
 
+export function letras3WasmPath(): string {
+  return resolve('../../../static/plugins/letras-v3.wasm');
+}
+
 export async function readCoreWasm(): Promise<Uint8Array> {
   return new Uint8Array(await readFile(coreWasmPath()));
 }
@@ -72,6 +77,14 @@ export async function readLetras2Wasm(): Promise<Uint8Array> {
   return new Uint8Array(await readFile(letras2WasmPath()));
 }
 
+export async function readLetras3Wasm(): Promise<Uint8Array> {
+  return new Uint8Array(await readFile(letras3WasmPath()));
+}
+
 export async function loadLetras2FromDisk(): Promise<PluginModule> {
   return loadLetras2(await readLetras2Wasm());
+}
+
+export async function loadLetras3FromDisk(): Promise<PluginModule> {
+  return loadLetras3(await readLetras3Wasm());
 }

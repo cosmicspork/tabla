@@ -104,7 +104,11 @@ export async function gameWhereMoverCanSpell(
     const rack = await rackOf(mover);
     const indices = wordFromRack(rack, real, prefer);
 
-    if (indices) return { ...table, mover, other, indices };
+    if (indices) {
+      // What it spells, so a test can expect the rules to name it back.
+      const word = indices.map((i) => (rack[i] === '?' ? 'e' : rack[i])).join('');
+      return { ...table, mover, other, indices, word };
+    }
 
     attempts.push(rack);
     await table.one.close();
