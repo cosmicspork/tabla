@@ -16,14 +16,24 @@
 //! raises them can still open an old export.
 //!
 //! The sealed plaintext is `postcard{ v, identity_seed, contacts, games,
-//! exported_at, name }`. A backup is the one thing here expected to be old, so
-//! version 1 files — which have no `name` — are still opened.
+//! exported_at, name, devices }`. A backup is the one thing here expected to be
+//! old, so version 1 files — which have no `name` — and version 2 files — which
+//! have no devices and carry less of each game — are still opened.
+//!
+//! The same format carries a device link, which is a backup that travels
+//! through the relay under a passphrase both devices already know instead of
+//! through a file. That is why version 3 records a game so much more fully than
+//! a backup ever needed to: a restored backup could afford to look like a fresh
+//! install that happens to know some history, but a device linked beside a
+//! phone still in use has to arrive holding the same pending invitations, the
+//! same finished games, and the same idea of whose turn it is.
 
 use serde::{Deserialize, Serialize};
 
+use crate::device::Device;
 use crate::error::CryptoError;
 use crate::identity::Identity;
-use crate::{GAME_ID_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN, SEED_LEN};
+use crate::{BLOB_ID_LEN, GAME_ID_LEN, HASH_LEN, KEY_LEN, NONCE_LEN, PUBKEY_LEN, SEED_LEN};
 
 pub const EXPORT_MAGIC: &[u8] = b"TABLAEXPORT1";
 pub const EXPORT_SALT_LEN: usize = 16;
@@ -57,21 +67,54 @@ pub struct Contact {
     pub first_seen: u64,
 }
 
-/// One game's full history, as stored locally.
+/// Where an invitation sent through a contact's mailbox is waiting.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MailboxRef {
+    pub id: String,
+    pub message_id: String,
+}
+
+/// One game's full history and everything the list needs to describe it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameExport {
     pub game_id: [u8; GAME_ID_LEN],
     pub plugin_id: String,
     pub plugin_version: u32,
     pub initiator_pub_key: [u8; PUBKEY_LEN],
-    pub claimer_pub_key: [u8; PUBKEY_LEN],
-    pub blob_id: [u8; 16],
+    /// Absent until someone has claimed the invitation. Version 2 could not say
+    /// that, so an export simply left out every game still waiting for a player
+    /// — acceptable for a backup, wrong for a link.
+    pub claimer_pub_key: Option<[u8; PUBKEY_LEN]>,
+    pub blob_id: [u8; BLOB_ID_LEN],
     /// The entropy the invite carried, needed to reconstruct the starting
     /// position. Tic tac toe ignores it, but a game with hidden state cannot be
     /// replayed without it, so it belongs in the backup.
     pub seed: [u8; 32],
     /// Encoded log entries, in order.
     pub entries: Vec<Vec<u8>>,
+
+    // Added in version 3. All of it is local bookkeeping that used to be
+    // reconstructed or defaulted on import, which was fine when an import meant
+    // a device with nothing else to contradict it.
+    /// `pending`, `active`, `finished`, `expired`, or `incompatible`, spelled
+    /// as the app spells it. A string rather than a number because the two
+    /// sides would otherwise need a mapping table each, and a mapping table is
+    /// a thing that drifts.
+    pub status: String,
+    pub created_at: u64,
+    pub last_activity: u64,
+    /// Still-unclaimed invitations only: the second half of the link, which the
+    /// relay never sees, and the token that withdraws it.
+    pub blob_key: Option<[u8; KEY_LEN]>,
+    pub cancel_token: Option<String>,
+    pub expires_at: Option<u64>,
+    pub dictionary: Option<[u8; HASH_LEN]>,
+    pub invited_contact: Option<[u8; PUBKEY_LEN]>,
+    pub mailbox: Option<MailboxRef>,
+    pub opponent_name: Option<String>,
+    pub your_turn: Option<bool>,
+    pub last_play: Option<String>,
+    pub outcome: Option<String>,
 }
 
 /// Everything an installation needs to be reconstructed elsewhere.
@@ -91,27 +134,101 @@ pub struct ExportBundle {
     /// itself — its theme, whether it wanted notifications — is a preference
     /// belonging to the device rather than to the person, and stays behind.
     pub name: String,
+    /// The other devices this person plays from, added in version 3, so a newly
+    /// linked one knows who else to tell about a game it starts.
+    pub devices: Vec<Device>,
 }
 
-/// Version 1 of the same struct, kept exactly as it was.
+/// The game shape versions 1 and 2 wrote, kept exactly as it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct GameExportV2 {
+    game_id: [u8; GAME_ID_LEN],
+    plugin_id: String,
+    plugin_version: u32,
+    initiator_pub_key: [u8; PUBKEY_LEN],
+    claimer_pub_key: [u8; PUBKEY_LEN],
+    blob_id: [u8; BLOB_ID_LEN],
+    seed: [u8; 32],
+    entries: Vec<Vec<u8>>,
+}
+
+/// Version 2 of the bundle, kept exactly as it was.
 ///
-/// Postcard is not self-describing, so the field added above changes how every
+/// Postcard is not self-describing, so every field added above changes how an
 /// earlier export would be read. Backups are the one thing here that is
 /// expected to be *old* — the point of one is that it still opens after a lost
-/// phone — so the old shape stays and files are decoded by the version they
+/// phone — so the old shapes stay and files are decoded by the version they
 /// announce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ExportBundleV2 {
+    v: u16,
+    identity_seed: [u8; SEED_LEN],
+    contacts: Vec<Contact>,
+    games: Vec<GameExportV2>,
+    exported_at: u64,
+    name: String,
+}
+
+/// Version 1 of the bundle: the same again, before names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct ExportBundleV1 {
     v: u16,
     identity_seed: [u8; SEED_LEN],
     contacts: Vec<Contact>,
-    games: Vec<GameExport>,
+    games: Vec<GameExportV2>,
     exported_at: u64,
+}
+
+impl From<GameExportV2> for GameExport {
+    fn from(old: GameExportV2) -> Self {
+        Self {
+            game_id: old.game_id,
+            plugin_id: old.plugin_id,
+            plugin_version: old.plugin_version,
+            initiator_pub_key: old.initiator_pub_key,
+            claimer_pub_key: Some(old.claimer_pub_key),
+            blob_id: old.blob_id,
+            seed: old.seed,
+            entries: old.entries,
+            // Only claimed games were ever written, so every one of them was
+            // playable when the file was made. Whether it has since finished is
+            // in the log, which the app reads on first open.
+            status: "active".into(),
+            created_at: 0,
+            last_activity: 0,
+            blob_key: None,
+            cancel_token: None,
+            expires_at: None,
+            dictionary: None,
+            invited_contact: None,
+            mailbox: None,
+            opponent_name: None,
+            your_turn: None,
+            last_play: None,
+            outcome: None,
+        }
+    }
+}
+
+impl From<ExportBundleV2> for ExportBundle {
+    fn from(old: ExportBundleV2) -> Self {
+        Self {
+            v: old.v,
+            identity_seed: old.identity_seed,
+            contacts: old.contacts,
+            games: old.games.into_iter().map(Into::into).collect(),
+            exported_at: old.exported_at,
+            name: old.name,
+            // Written by a build where an identity lived on one device. The
+            // device restoring this is about to become the first one recorded.
+            devices: Vec::new(),
+        }
+    }
 }
 
 impl From<ExportBundleV1> for ExportBundle {
     fn from(old: ExportBundleV1) -> Self {
-        Self {
+        ExportBundleV2 {
             v: old.v,
             identity_seed: old.identity_seed,
             contacts: old.contacts,
@@ -122,11 +239,14 @@ impl From<ExportBundleV1> for ExportBundle {
             // worse than asking.
             name: String::new(),
         }
+        .into()
     }
 }
 
-pub const EXPORT_VERSION: u16 = 2;
+pub const EXPORT_VERSION: u16 = 3;
 
+/// The last version that carried no devices, and only claimed games.
+const EXPORT_VERSION_ONE_DEVICE: u16 = 2;
 /// The last version that carried no name.
 const EXPORT_VERSION_UNNAMED: u16 = 1;
 
@@ -232,6 +352,9 @@ pub fn import(passphrase: &[u8], bytes: &[u8]) -> Result<ExportBundle, CryptoErr
 
     let bundle: ExportBundle = match version {
         EXPORT_VERSION => postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)?,
+        EXPORT_VERSION_ONE_DEVICE => postcard::from_bytes::<ExportBundleV2>(&plaintext)
+            .map_err(|_| CryptoError::BadEncoding)?
+            .into(),
         EXPORT_VERSION_UNNAMED => postcard::from_bytes::<ExportBundleV1>(&plaintext)
             .map_err(|_| CryptoError::BadEncoding)?
             .into(),
@@ -245,15 +368,38 @@ pub fn import(passphrase: &[u8], bytes: &[u8]) -> Result<ExportBundle, CryptoErr
 mod tests {
     use super::*;
 
-    /// The exact shape version 1 had, so a file written by that build can be
-    /// constructed here without that build being present.
+    /// The exact shapes versions 1 and 2 had, so a file written by one of those
+    /// builds can be constructed here without that build being present.
     #[derive(Serialize)]
     struct V1 {
         v: u16,
         identity_seed: [u8; SEED_LEN],
         contacts: Vec<Contact>,
-        games: Vec<GameExport>,
+        games: Vec<GameExportV2>,
         exported_at: u64,
+    }
+
+    #[derive(Serialize)]
+    struct V2 {
+        v: u16,
+        identity_seed: [u8; SEED_LEN],
+        contacts: Vec<Contact>,
+        games: Vec<GameExportV2>,
+        exported_at: u64,
+        name: String,
+    }
+
+    fn old_game() -> GameExportV2 {
+        GameExportV2 {
+            game_id: [1u8; GAME_ID_LEN],
+            plugin_id: "letras".into(),
+            plugin_version: 3,
+            initiator_pub_key: [2u8; PUBKEY_LEN],
+            claimer_pub_key: [3u8; PUBKEY_LEN],
+            blob_id: [4u8; BLOB_ID_LEN],
+            seed: [5u8; 32],
+            entries: vec![vec![6u8; 8]],
+        }
     }
 
     fn cheap() -> KdfParams {
@@ -292,7 +438,7 @@ mod tests {
             v: 1,
             identity_seed: [5u8; SEED_LEN],
             contacts: Vec::new(),
-            games: Vec::new(),
+            games: vec![old_game()],
             exported_at: 1_780_000_100,
         };
 
@@ -305,6 +451,93 @@ mod tests {
         assert_eq!(restored.identity_seed, [5u8; SEED_LEN]);
         // Nobody was called anything then. Empty rather than invented.
         assert_eq!(restored.name, "");
+        assert_eq!(restored.devices, Vec::new());
+
+        // The game survives the two format changes it never knew about.
+        let game = &restored.games[0];
+        assert_eq!(game.claimer_pub_key, Some([3u8; PUBKEY_LEN]));
+        assert_eq!(game.entries, vec![vec![6u8; 8]]);
+        assert_eq!(game.status, "active");
+    }
+
+    #[test]
+    fn a_backup_taken_before_devices_still_opens() {
+        let old = V2 {
+            v: 2,
+            identity_seed: [5u8; SEED_LEN],
+            contacts: Vec::new(),
+            games: vec![old_game()],
+            exported_at: 1_780_000_100,
+            name: "Josh".into(),
+        };
+
+        let restored = import(
+            b"pw",
+            &file_containing(&postcard::to_allocvec(&old).unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(restored.name, "Josh");
+        assert_eq!(restored.devices, Vec::new());
+        assert_eq!(restored.games[0].status, "active");
+    }
+
+    #[test]
+    fn a_link_carries_an_invitation_nobody_has_claimed() {
+        // The case version 2 could not express, and the reason for version 3: a
+        // device linked beside a phone has to arrive holding the invitations
+        // that phone is still waiting on, key and cancel token and all.
+        let pending = GameExport {
+            game_id: [1u8; GAME_ID_LEN],
+            plugin_id: "letras".into(),
+            plugin_version: 3,
+            initiator_pub_key: [2u8; PUBKEY_LEN],
+            claimer_pub_key: None,
+            blob_id: [4u8; BLOB_ID_LEN],
+            seed: [5u8; 32],
+            entries: Vec::new(),
+            status: "pending".into(),
+            created_at: 1_780_000_000,
+            last_activity: 1_780_000_000,
+            blob_key: Some([7u8; KEY_LEN]),
+            cancel_token: Some("tok".into()),
+            expires_at: Some(1_780_600_000),
+            dictionary: Some([8u8; HASH_LEN]),
+            invited_contact: Some([9u8; PUBKEY_LEN]),
+            mailbox: Some(MailboxRef {
+                id: "mb".into(),
+                message_id: "msg".into(),
+            }),
+            opponent_name: Some("Pooja".into()),
+            your_turn: None,
+            last_play: None,
+            outcome: None,
+        };
+
+        let bundle = ExportBundle {
+            v: EXPORT_VERSION,
+            identity_seed: [5u8; SEED_LEN],
+            contacts: Vec::new(),
+            games: vec![pending.clone()],
+            exported_at: 1_780_000_100,
+            name: "Josh".into(),
+            devices: vec![crate::device::Device {
+                id: [1u8; crate::device::DEVICE_ID_LEN],
+                name: "Laptop".into(),
+                linked_at: 1_780_000_000,
+            }],
+        };
+
+        let file = export(
+            b"pw",
+            &bundle,
+            &[7u8; EXPORT_SALT_LEN],
+            &[3u8; NONCE_LEN],
+            cheap(),
+        )
+        .unwrap();
+
+        assert_eq!(import(b"pw", &file).unwrap(), bundle);
     }
 
     #[test]

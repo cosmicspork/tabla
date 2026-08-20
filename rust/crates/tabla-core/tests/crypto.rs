@@ -1,6 +1,7 @@
 //! Behavioural tests for identity, key agreement, sealing, sessions, invites,
 //! and the export format.
 
+use tabla_core::device::{DEVICE_ID_LEN, Device};
 use tabla_core::error::CryptoError;
 use tabla_core::export::{Contact, ExportBundle, GameExport, KdfParams, export, import};
 use tabla_core::identity::{Identity, parse_public_key};
@@ -227,6 +228,46 @@ fn a_body_cannot_be_moved_to_another_position() {
 
     // The AAD binds the payload to sequence 5.
     assert_eq!(s.open_body(6, &sealed), Err(CryptoError::Decrypt));
+}
+
+#[test]
+fn a_hold_names_the_device_that_took_it() {
+    let s = session_for(&initiator(), &claimer());
+    let sealed = s.seal_hold(&nonce(7), &[4u8; DEVICE_ID_LEN]).unwrap();
+
+    assert_eq!(s.open_hold(&sealed).unwrap(), [4u8; DEVICE_ID_LEN]);
+}
+
+#[test]
+fn a_hold_does_not_open_in_another_game() {
+    let s = session_for(&initiator(), &claimer());
+    let sealed = s.seal_hold(&nonce(7), &[4u8; DEVICE_ID_LEN]).unwrap();
+
+    // Same two players, same key derivation, different game: the AAD names the
+    // game, so a hold cannot be replayed from one board onto another.
+    let elsewhere = Session::new(
+        [7u8; GAME_ID_LEN],
+        agree_game_key(
+            &initiator(),
+            &claimer().verifying_key(),
+            &BLOB,
+            &[7u8; GAME_ID_LEN],
+        ),
+        initiator().verifying_key(),
+        claimer().verifying_key(),
+    );
+    assert_eq!(elsewhere.open_hold(&sealed), Err(CryptoError::Decrypt));
+}
+
+#[test]
+fn a_hold_is_not_a_log_entry() {
+    // Holds are relay state with an expiry, never appended. If one could be
+    // read as a body the replay would have to decide what it meant, and every
+    // build that predates them would reject the game outright.
+    let s = session_for(&initiator(), &claimer());
+    let sealed = s.seal_hold(&nonce(7), &[4u8; DEVICE_ID_LEN]).unwrap();
+
+    assert!(s.open_body(0, &sealed).is_err());
 }
 
 #[test]
@@ -664,13 +705,31 @@ fn bundle() -> ExportBundle {
             plugin_id: "tictactoe".into(),
             plugin_version: 1,
             initiator_pub_key: a.public_key(),
-            claimer_pub_key: b.public_key(),
+            claimer_pub_key: Some(b.public_key()),
             blob_id: BLOB,
             seed: [9u8; 32],
             entries: entries.iter().map(|e| e.encode()).collect(),
+            status: "active".into(),
+            created_at: 1_780_000_000,
+            last_activity: 1_780_000_050,
+            blob_key: None,
+            cancel_token: None,
+            expires_at: None,
+            dictionary: None,
+            invited_contact: None,
+            mailbox: None,
+            opponent_name: Some("opponent".into()),
+            your_turn: Some(true),
+            last_play: None,
+            outcome: None,
         }],
         exported_at: 1_780_000_100,
         name: "Ada".into(),
+        devices: vec![Device {
+            id: [1u8; DEVICE_ID_LEN],
+            name: "Phone".into(),
+            linked_at: 1_780_000_000,
+        }],
     }
 }
 
@@ -724,7 +783,7 @@ fn a_restored_export_still_verifies_its_logs() {
         .collect();
 
     let a = parse_public_key(&game.initiator_pub_key).unwrap();
-    let b = parse_public_key(&game.claimer_pub_key).unwrap();
+    let b = parse_public_key(&game.claimer_pub_key.unwrap()).unwrap();
     let key = agree_game_key(&restored.identity(), &b, &game.blob_id, &game.game_id);
     let session = Session::new(game.game_id, key, a, b);
 
