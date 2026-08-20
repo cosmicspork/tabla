@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/cosmicspork/tabla/compare/v0.2.0...v0.3.0) (2026-08-20)
+
+
+### Features
+
+* **app:** give settings a shape, and the app a mark ([#13](https://github.com/cosmicspork/tabla/issues/13)) ([a8fe8c6](https://github.com/cosmicspork/tabla/commit/a8fe8c6186686b7772ca93ab6570ac84e6e3d54c))
+* **app:** sort the game list by who has to move next ([#12](https://github.com/cosmicspork/tabla/issues/12)) ([b761c05](https://github.com/cosmicspork/tabla/commit/b761c05aef0f0b468a93eaf78d625364d602d7fa))
+* let people have names, and start a game by choosing one ([#14](https://github.com/cosmicspork/tabla/issues/14)) ([e06fbe9](https://github.com/cosmicspork/tabla/commit/e06fbe920e02706415e6e04244b578fb8c6e035b))
+* **letras:** check words as they are played, and drop the challenge ([#16](https://github.com/cosmicspork/tabla/issues/16)) ([6928135](https://github.com/cosmicspork/tabla/commit/692813533672c3bfdba417d095a8a3c7ff25f024))
+* **relay:** invite someone you have played, without sending them anything ([#15](https://github.com/cosmicspork/tabla/issues/15)) ([4fdeaca](https://github.com/cosmicspork/tabla/commit/4fdeacae5dbbbbce14cfaf134d85430358e45109))
+* **relay:** let an invite be withdrawn before anyone takes it ([#11](https://github.com/cosmicspork/tabla/issues/11)) ([db7fed2](https://github.com/cosmicspork/tabla/commit/db7fed24f011674e9d42d7a06f649360be567b10))
+
+
+### Bug Fixes
+
+* **app:** give every screen a header, and say what is happening at the top ([#10](https://github.com/cosmicspork/tabla/issues/10)) ([277bf34](https://github.com/cosmicspork/tabla/commit/277bf341e42f41e36d95654ce2fbac55a7c7fbaf))
+* **worker:** give push a real contact instead of a placeholder ([58f0a1d](https://github.com/cosmicspork/tabla/commit/58f0a1d7aaa8d093e1bbc085a408c2fc0a8b1624))
+
 ## [0.2.0](https://github.com/cosmicspork/tabla/compare/v0.1.0...v0.2.0) (2026-08-20)
 
 
