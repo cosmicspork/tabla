@@ -652,7 +652,7 @@ fn bundle() -> ExportBundle {
     let (_, entries) = play(&a, &b, &[b"m0", b"m1"]);
 
     ExportBundle {
-        v: 1,
+        v: tabla_core::export::EXPORT_VERSION,
         identity_seed: a.seed(),
         contacts: vec![Contact {
             public_key: b.public_key(),
@@ -670,6 +670,7 @@ fn bundle() -> ExportBundle {
             entries: entries.iter().map(|e| e.encode()).collect(),
         }],
         exported_at: 1_780_000_100,
+        name: "Ada".into(),
     }
 }
 
@@ -686,6 +687,17 @@ fn an_export_round_trips() {
     .unwrap();
 
     assert_eq!(import(b"correct horse", &file).unwrap(), original);
+}
+
+#[test]
+fn an_export_carries_the_name_the_identity_answers_to() {
+    // A restored device that had everything except its own name would go on
+    // introducing itself to new opponents as nobody, and nothing on the old
+    // device would ever say so — the people it had already played cached the
+    // name on their side.
+    let file = export(b"pw", &bundle(), &[1u8; 16], &nonce(2), test_kdf()).unwrap();
+
+    assert_eq!(import(b"pw", &file).unwrap().name, "Ada");
 }
 
 #[test]

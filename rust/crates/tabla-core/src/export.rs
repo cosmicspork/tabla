@@ -14,6 +14,10 @@
 //!
 //! The Argon2id parameters are stored in the file so that a future build which
 //! raises them can still open an old export.
+//!
+//! The sealed plaintext is `postcard{ v, identity_seed, contacts, games,
+//! exported_at, name }`. A backup is the one thing here expected to be old, so
+//! version 1 files — which have no `name` — are still opened.
 
 use serde::{Deserialize, Serialize};
 
@@ -78,9 +82,53 @@ pub struct ExportBundle {
     pub contacts: Vec<Contact>,
     pub games: Vec<GameExport>,
     pub exported_at: u64,
+    /// What this player asks to be called, added in version 2.
+    ///
+    /// It travels with the identity because it belongs to it: the name is what
+    /// the people you play write next to your key, and a device that restored
+    /// everything except its own name would go on introducing itself to new
+    /// opponents as nobody. Everything else this installation knows about
+    /// itself — its theme, whether it wanted notifications — is a preference
+    /// belonging to the device rather than to the person, and stays behind.
+    pub name: String,
 }
 
-pub const EXPORT_VERSION: u16 = 1;
+/// Version 1 of the same struct, kept exactly as it was.
+///
+/// Postcard is not self-describing, so the field added above changes how every
+/// earlier export would be read. Backups are the one thing here that is
+/// expected to be *old* — the point of one is that it still opens after a lost
+/// phone — so the old shape stays and files are decoded by the version they
+/// announce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ExportBundleV1 {
+    v: u16,
+    identity_seed: [u8; SEED_LEN],
+    contacts: Vec<Contact>,
+    games: Vec<GameExport>,
+    exported_at: u64,
+}
+
+impl From<ExportBundleV1> for ExportBundle {
+    fn from(old: ExportBundleV1) -> Self {
+        Self {
+            v: old.v,
+            identity_seed: old.identity_seed,
+            contacts: old.contacts,
+            games: old.games,
+            exported_at: old.exported_at,
+            // Taken before names existed. Empty rather than invented: the
+            // device can be told what to call itself, and guessing would be
+            // worse than asking.
+            name: String::new(),
+        }
+    }
+}
+
+pub const EXPORT_VERSION: u16 = 2;
+
+/// The last version that carried no name.
+const EXPORT_VERSION_UNNAMED: u16 = 1;
 
 impl ExportBundle {
     pub fn identity(&self) -> Identity {
@@ -175,10 +223,106 @@ pub fn import(passphrase: &[u8], bytes: &[u8]) -> Result<ExportBundle, CryptoErr
     )?;
     let plaintext = crate::seal::open(&key, EXPORT_AAD, &bytes[off..])?;
 
-    let bundle: ExportBundle =
-        postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)?;
-    if bundle.v != EXPORT_VERSION {
-        return Err(CryptoError::UnsupportedVersion(bundle.v));
-    }
+    // The version is read first and the rest decoded to match, because postcard
+    // cannot tell one shape from another by looking: decoding a version 1 file
+    // as a version 2 struct does not fail cleanly, it reads whatever follows
+    // the last field it recognises.
+    let (version, _) =
+        postcard::take_from_bytes::<u16>(&plaintext).map_err(|_| CryptoError::BadEncoding)?;
+
+    let bundle: ExportBundle = match version {
+        EXPORT_VERSION => postcard::from_bytes(&plaintext).map_err(|_| CryptoError::BadEncoding)?,
+        EXPORT_VERSION_UNNAMED => postcard::from_bytes::<ExportBundleV1>(&plaintext)
+            .map_err(|_| CryptoError::BadEncoding)?
+            .into(),
+        other => return Err(CryptoError::UnsupportedVersion(other)),
+    };
+
     Ok(bundle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The exact shape version 1 had, so a file written by that build can be
+    /// constructed here without that build being present.
+    #[derive(Serialize)]
+    struct V1 {
+        v: u16,
+        identity_seed: [u8; SEED_LEN],
+        contacts: Vec<Contact>,
+        games: Vec<GameExport>,
+        exported_at: u64,
+    }
+
+    fn cheap() -> KdfParams {
+        // Argon2id at real cost, several times, is most of a test run.
+        KdfParams {
+            m_cost: 8,
+            t_cost: 1,
+            p_cost: 1,
+        }
+    }
+
+    /// Writes a file the way `export` does, around a plaintext of our choosing.
+    fn file_containing(plaintext: &[u8]) -> Vec<u8> {
+        let params = cheap();
+        let salt = [7u8; EXPORT_SALT_LEN];
+        let key = derive_key(b"pw", &salt, params).unwrap();
+        let sealed = crate::seal::seal(&key, &[3u8; NONCE_LEN], EXPORT_AAD, plaintext).unwrap();
+
+        let mut out = Vec::new();
+        out.extend_from_slice(EXPORT_MAGIC);
+        out.extend_from_slice(&params.m_cost.to_le_bytes());
+        out.extend_from_slice(&params.t_cost.to_le_bytes());
+        out.push(params.p_cost);
+        out.extend_from_slice(&salt);
+        out.extend_from_slice(&sealed);
+        out
+    }
+
+    #[test]
+    fn a_backup_taken_before_names_still_opens() {
+        // The one file in this project that is *expected* to be old: the point
+        // of a backup is that it opens after the phone that wrote it is gone.
+        // A format change that broke last month's export would break it at
+        // exactly the moment somebody needed it.
+        let old = V1 {
+            v: 1,
+            identity_seed: [5u8; SEED_LEN],
+            contacts: Vec::new(),
+            games: Vec::new(),
+            exported_at: 1_780_000_100,
+        };
+
+        let restored = import(
+            b"pw",
+            &file_containing(&postcard::to_allocvec(&old).unwrap()),
+        )
+        .unwrap();
+
+        assert_eq!(restored.identity_seed, [5u8; SEED_LEN]);
+        // Nobody was called anything then. Empty rather than invented.
+        assert_eq!(restored.name, "");
+    }
+
+    #[test]
+    fn a_file_from_a_version_that_does_not_exist_yet_is_refused() {
+        let ahead = V1 {
+            v: 99,
+            identity_seed: [5u8; SEED_LEN],
+            contacts: Vec::new(),
+            games: Vec::new(),
+            exported_at: 0,
+        };
+
+        assert!(matches!(
+            import(
+                b"pw",
+                &file_containing(&postcard::to_allocvec(&ahead).unwrap())
+            ),
+            Err(CryptoError::UnsupportedVersion(99))
+        ));
+    }
 }

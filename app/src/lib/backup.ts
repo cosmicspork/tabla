@@ -15,9 +15,15 @@ import { db } from './db/schema.ts';
 import type { GameRecord } from './db/schema.ts';
 import { listContacts, listGames, loadEntries } from './db/store.ts';
 import { loadIdentity, randomBytes, replaceIdentity } from './identity.ts';
-import { markOnboarded } from './profile.ts';
+import { displayName, markOnboarded, setDisplayName } from './profile.ts';
 
 export const BACKUP_EXTENSION = '.tabla';
+
+/**
+ * The bundle format this build writes. Mirrors `EXPORT_VERSION` in
+ * `tabla-core::export`, which is what refuses a file it does not understand.
+ */
+const EXPORT_VERSION = 2;
 
 /** Mirrors the Rust `ExportBundle`, which is what the WASM layer expects. */
 interface BundleJson {
@@ -35,6 +41,8 @@ interface BundleJson {
     entries: number[][];
   }[];
   exported_at: number;
+  /** What this player asks to be called. Restored with the identity it names. */
+  name: string;
 }
 
 const bytes = (base64url: string) => [...fromBase64Url(base64url)];
@@ -53,8 +61,9 @@ export async function exportBackup(passphrase: string): Promise<Uint8Array> {
   );
 
   const bundle: BundleJson = {
-    v: 1,
+    v: EXPORT_VERSION,
     identity_seed: [...identity.seed()],
+    name: await displayName(),
     contacts: (await listContacts()).map((contact) => ({
       public_key: bytes(contact.publicKey),
       name: contact.name,
@@ -144,6 +153,15 @@ export async function importBackup(passphrase: string, file: Uint8Array): Promis
 
   await tx.done;
   await replaceIdentity(seed);
+
+  // The name belongs to the identity, not to the phone it was on: a device that
+  // restored everything except what it is called would go on introducing itself
+  // to new opponents as nobody, and nothing would ever say so — the people it
+  // had already played cached the name on their side. Empty from a backup taken
+  // before names existed, which leaves the field to be filled in rather than
+  // overwriting something with nothing.
+  if (bundle.name) await setDisplayName(bundle.name);
+
   // A device that has just been handed an identity and a history has plainly
   // been introduced; asking it who it is would be absurd.
   await markOnboarded();
