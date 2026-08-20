@@ -57,6 +57,15 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # Split in two because a full run does not fit. Chromium holds around four
+    # gigabytes across a suite this size and the Worker another gigabyte, which
+    # on a seven-gigabyte runner is close enough to the edge that the Worker is
+    # occasionally killed — and every test after that fails with a connection
+    # error rather than anything to do with the change under test.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust (wasm32)
@@ -86,12 +95,12 @@ jobs:
         run: bunx playwright install --with-deps chromium
       # Builds the app and serves it through the real Worker, so the service
       # worker, the plugin downloads and push all behave as they do in production.
-      - run: just test-e2e
+      - run: just test-e2e --shard=${{ matrix.shard }}/2
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             e2e/playwright-report
             test-results

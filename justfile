@@ -127,9 +127,15 @@ test-ts: types
     cd worker && bun run test
     cd app && bun run test
 
-# Browser acceptance tests against the built app served by the Worker
-test-e2e: build
-    cd e2e && bunx playwright test
+# Browser acceptance tests against the built app served by the Worker.
+#
+# Extra arguments go straight to playwright, which is how CI splits the suite:
+# `just test-e2e --shard=1/2`. The split is about memory rather than speed — a
+# whole run holds several gigabytes of browser alongside the Worker, and a CI
+# runner that goes over its limit kills the Worker rather than the browser,
+# which fails every remaining test with a connection error.
+test-e2e *args: build
+    cd e2e && bunx playwright test {{args}}
 
 # Recapture the README screenshots from real games.
 #
