@@ -535,12 +535,23 @@ export class GameSession {
     }
 
     const board = await this.board();
-    if (board.outcome && this.game.status !== 'finished') {
-      this.game =
-        (await updateGame(this.game.gameId, {
-          status: 'finished',
-          outcome: describeOutcome(board.outcome, this.player, board.resignedBy),
-        })) ?? this.game;
+
+    // Everything the game list wants to say about this game is known right
+    // here, once, having already paid for the replay. Working it out again per
+    // row, on a page that shows every game at once, would mean replaying every
+    // log on every render.
+    if (board.ready) {
+      const summary: Partial<GameRecord> = {
+        yourTurn: Boolean(board.view.yourTurn),
+        lastPlay: summarizeLastPlay(board.view, this.player),
+      };
+
+      if (board.outcome && this.game.status !== 'finished') {
+        summary.status = 'finished';
+        summary.outcome = describeOutcome(board.outcome, this.player, board.resignedBy);
+      }
+
+      this.game = (await updateGame(this.game.gameId, summary)) ?? this.game;
     }
 
     await this.notify();
@@ -603,6 +614,21 @@ function opened(action: unknown, ending: number[]): number[] {
  * A resignation is a win for somebody, but calling it that reads as though the
  * game was played out. Both players are told the same thing about it.
  */
+/**
+ * The last move, in a sentence, for a list that cannot show a board.
+ *
+ * Only games that report a last play have one — tic tac toe's view says which
+ * cells are taken, not which was taken most recently, and inventing a sentence
+ * from that would be guessing. Those rows fall back to whose turn it is.
+ */
+function summarizeLastPlay(view: Record<string, unknown>, player: number): string | undefined {
+  const play = view.lastPlay as { by: number; words: string[]; score: number } | null | undefined;
+  if (!play || play.words.length === 0) return undefined;
+
+  const who = play.by === player ? 'You played' : 'They played';
+  return `${who} ${play.words.join(', ').toUpperCase()} for ${play.score}`;
+}
+
 export function describeOutcome(
   outcome: PluginOutcome,
   player: number,

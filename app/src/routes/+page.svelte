@@ -4,12 +4,16 @@
   import { listGames } from '$lib/db/store.ts';
   import type { GameRecord } from '$lib/db/schema.ts';
   import { cancelPendingGame, createGame, refreshPendingGame } from '$lib/games.ts';
+  import { groupGames, type Group } from '$lib/game-list.ts';
+  import { onShouldResync } from '$lib/lifecycle.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
-  import { availableGames, titleOf } from '$lib/registry.ts';
+  import { availableGames } from '$lib/registry.ts';
 
-  let games = $state<GameRecord[]>([]);
+  let groups = $state<Group[]>([]);
+  let loaded = $state(false);
   let creating = $state<string | null>(null);
   let picking = $state(false);
+  let showFinished = $state(false);
   let failure = $state<string | null>(null);
 
   // Home is the one screen with no page title: the header shows the wordmark.
@@ -18,7 +22,7 @@
   });
 
   async function refresh() {
-    games = await listGames();
+    let games = await listGames();
 
     // Pending invites may have been redeemed since we last looked.
     const pending = games.filter((game) => game.status === 'pending');
@@ -26,10 +30,26 @@
       await Promise.all(pending.map((game) => refreshPendingGame(game.gameId).catch(() => {})));
       games = await listGames();
     }
+
+    groups = await groupGames(games);
+    loaded = true;
   }
 
   $effect(() => {
     void refresh();
+
+    // Re-read on the moments the answer can have changed: coming back to the
+    // app, regaining a network, being woken by a push.
+    //
+    // This refreshes what *this device* knows, which for an active game is
+    // whatever it learned the last time that game was open. Making the list
+    // itself current would mean a socket per game just to draw it, and sync
+    // deliberately happens on opening a game and on push instead. The
+    // consequence is honest but worth knowing: a game can be your move for a
+    // while before the list says so, and the push is what tells you.
+    return onShouldResync(() => {
+      void refresh();
+    });
   });
 
   async function newGame(pluginId: string) {
@@ -57,16 +77,10 @@
     }
   }
 
-  function label(game: GameRecord): string {
-    if (game.status === 'pending') return 'Waiting for someone to join';
-    if (game.status === 'expired') return 'Nobody took this invite';
-    if (game.status === 'incompatible') return 'Needs a newer version of tabla';
-    if (game.status === 'finished') return game.outcome ?? 'Finished';
-    return game.role === 'initiator' ? 'You started this one' : 'They invited you';
-  }
+  const finished = $derived(groups.find((group) => group.key === 'finished'));
+  const active = $derived(groups.filter((group) => group.key !== 'finished'));
+  const empty = $derived(loaded && groups.length === 0);
 </script>
-
-<h2 class="screen-title">Your games</h2>
 
 {#if failure}
   <p class="notice warn">{failure}</p>
@@ -95,7 +109,7 @@
     <button class="primary" onclick={() => (picking = true)}>Start a new game</button>
   {/if}
 
-  {#if games.length === 0}
+  {#if empty}
     <div class="card">
       <h2>Nothing here yet</h2>
       <p class="muted">
@@ -103,34 +117,61 @@
         travels in the part of the URL your browser never sends to a server.
       </p>
     </div>
-  {:else}
-    <ul>
-      {#each games as game (game.gameId)}
-        <li>
-          <a class="card game" href="/g/{encodeURIComponent(game.gameId)}">
-            <span class="title">{titleOf(game.pluginId)}</span>
-            <span class="muted">{label(game)}</span>
-          </a>
-          {#if game.status === 'pending' || game.status === 'expired'}
-            <button class="ghost cancel" onclick={() => cancel(game)}>
-              {game.status === 'expired' ? 'Remove' : 'Cancel invite'}
-            </button>
-          {/if}
-        </li>
-      {/each}
-    </ul>
+  {/if}
+
+  {#each active as group (group.key)}
+    <section>
+      <h2 class="group">
+        <span>{group.title}</span>
+        <span class="count">{group.games.length}</span>
+      </h2>
+      <ul>
+        {#each group.games as listed (listed.game.gameId)}
+          <li>
+            <a class="card game" href="/g/{encodeURIComponent(listed.game.gameId)}">
+              <span class="line">
+                <span class="title">{listed.title}</span>
+                <span class="muted when">{listed.when}</span>
+              </span>
+              <span class="muted detail">{listed.detail}</span>
+            </a>
+            {#if listed.cancellable}
+              <button class="ghost cancel" onclick={() => cancel(listed.game)}>
+                {listed.game.status === 'expired' ? 'Remove' : 'Cancel invite'}
+              </button>
+            {/if}
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/each}
+
+  {#if finished}
+    <section class="past">
+      <button class="group as-button" onclick={() => (showFinished = !showFinished)}>
+        <span>Finished</span>
+        <span class="count">{finished.games.length}{showFinished ? '' : ' ›'}</span>
+      </button>
+      {#if showFinished}
+        <ul>
+          {#each finished.games as listed (listed.game.gameId)}
+            <li>
+              <a class="card game" href="/g/{encodeURIComponent(listed.game.gameId)}">
+                <span class="line">
+                  <span class="title">{listed.title}</span>
+                  <span class="muted when">{listed.when}</span>
+                </span>
+                <span class="muted detail">{listed.detail}</span>
+              </a>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
   {/if}
 </div>
 
 <style>
-  /* The header owns the only `h1`, so the list heading is an `h2` that looks
-     like the page title it used to be. */
-  .screen-title {
-    font-size: 1.5rem;
-    letter-spacing: -0.02em;
-    margin: 0 0 0.75rem;
-  }
-
   ul {
     list-style: none;
     margin: 0;
@@ -144,9 +185,40 @@
     gap: 0.15rem;
   }
 
-  .game {
+  /* A section heading, not a page heading: the header owns the only `h1`, and
+     these are labels for a list rather than titles for a screen. */
+  .group {
     display: flex;
-    flex-direction: column;
+    align-items: baseline;
+    justify-content: space-between;
+    margin: 0 0 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+
+  .as-button {
+    width: 100%;
+    border: none;
+    background: none;
+    padding: 0;
+    text-align: left;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+  }
+
+  .count {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .game {
+    display: grid;
     gap: 0.15rem;
     text-decoration: none;
     color: inherit;
@@ -156,8 +228,28 @@
     border-color: var(--accent);
   }
 
+  .line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
   .title {
     font-weight: 550;
+  }
+
+  .when {
+    font-size: 0.8rem;
+    flex: none;
+  }
+
+  .detail {
+    font-size: 0.9rem;
+  }
+
+  .past {
+    margin-top: 1rem;
   }
 
   .picker {

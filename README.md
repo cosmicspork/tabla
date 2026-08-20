@@ -10,10 +10,11 @@ itself with ads and data harvesting.
 game, send the link to one person, and play at whatever pace suits you both.
 
 <p align="center">
-  <img src="docs/screenshots/invite.png" width="24%" alt="Invite: one link, good once, with the key in the fragment">
-  <img src="docs/screenshots/letras.png" width="24%" alt="Letras: a word scored on the board, a rack only this device can read">
-  <img src="docs/screenshots/challenge.png" width="24%" alt="Challenge: the opponent decides whether that was a word">
-  <img src="docs/screenshots/games.png" width="24%" alt="Settings: which game modules this device is holding, and how to remove them">
+  <img src="docs/screenshots/home.png" width="19%" alt="Home: games sorted by who has to move next">
+  <img src="docs/screenshots/invite.png" width="19%" alt="Invite: one link, good once, with the key in the fragment">
+  <img src="docs/screenshots/letras.png" width="19%" alt="Letras: a word scored on the board, a rack only this device can read">
+  <img src="docs/screenshots/challenge.png" width="19%" alt="Challenge: the opponent decides whether that was a word">
+  <img src="docs/screenshots/games.png" width="19%" alt="Settings: which game modules this device is holding, and how to remove them">
 </p>
 <p align="center"><sub>Real games, dealt by the real protocol — regenerate with
 <code>just screenshots</code>.</sub></p>

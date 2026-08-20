@@ -90,6 +90,16 @@ export async function appendEntries(
 }
 
 /** Every stored entry for a game, in sequence order. */
+/**
+ * How many entries a game's log holds, without reading any of them.
+ *
+ * The list needs the log's *length* to work out whose turn it is; it has no
+ * business decrypting the entries themselves, and they are the large part.
+ */
+export async function countEntries(gameId: string): Promise<number> {
+  return (await db()).countFromIndex('entries', 'byGame', gameId);
+}
+
 export async function loadEntries(gameId: string): Promise<Uint8Array[]> {
   const rows = await (await db()).getAllFromIndex('entries', 'byGame', gameId);
   return rows.toSorted((a, b) => a.seq - b.seq).map((row) => row.entry);

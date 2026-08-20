@@ -72,6 +72,17 @@ export interface GameRecord {
   lastActivity: number;
   /** Cached for the game list, so it renders without decrypting everything. */
   opponentName?: string;
+  /**
+   * Whose move it is, as of the last time this game was open.
+   *
+   * The list is sorted by it, and working it out properly means replaying a log
+   * through the rules — far too much to do for every row on every render. It is
+   * written when the board renders, and recomputed from the log's shape when a
+   * game has not been opened since this field existed.
+   */
+  yourTurn?: boolean;
+  /** One line of what happened last: "They played ZEBRA for 48". */
+  lastPlay?: string;
   outcome?: string;
 }
 
