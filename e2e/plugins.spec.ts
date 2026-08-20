@@ -82,15 +82,16 @@ test('a downloaded game can be removed and comes back on its own', async ({ brow
     timeout: 30_000,
   });
 
-  // Settings knows what is here and how much room it takes.
-  await a.goto('/settings');
-  const entry = a.locator('li[data-plugin="letras"][data-version="2"]');
+  // Storage knows what is here and how much room it takes. One row per game,
+  // with its versions inside it.
+  await a.goto('/settings/storage');
+  const entry = a.locator('section[data-plugin="letras"]');
   await expect(entry).toContainText('on this device');
-  await expect(entry.locator('.size')).not.toHaveAttribute('data-size', '0');
+  await expect(entry.locator('[data-size]')).not.toHaveAttribute('data-size', '0');
 
   await entry.getByRole('button', { name: 'Remove' }).click();
-  await expect(entry).toContainText('not downloaded');
-  await expect(entry.locator('.size')).toHaveAttribute('data-size', '0');
+  await expect(entry).toContainText('Not downloaded');
+  await expect(entry.locator('[data-size]')).toHaveAttribute('data-size', '0');
 
   // The game itself is untouched — logs and keys were never part of this — so
   // opening it simply fetches the rules again and carries on.

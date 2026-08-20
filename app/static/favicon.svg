@@ -1,16 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="tabla">
-  <rect width="512" height="512" rx="112" fill="#2f6f57" />
-  <g stroke="#f4f1ea" stroke-width="18" stroke-linecap="round" opacity="0.55">
-    <line x1="192" y1="128" x2="192" y2="384" />
-    <line x1="320" y1="128" x2="320" y2="384" />
-    <line x1="128" y1="192" x2="384" y2="192" />
-    <line x1="128" y1="320" x2="384" y2="320" />
-  </g>
-  <g stroke="#f4f1ea" stroke-width="26" stroke-linecap="round" fill="none">
-    <line x1="140" y1="140" x2="180" y2="180" />
-    <line x1="180" y1="140" x2="140" y2="180" />
-    <line x1="332" y1="332" x2="372" y2="372" />
-    <line x1="372" y1="332" x2="332" y2="372" />
-  </g>
-  <circle cx="256" cy="256" r="26" stroke="#f4f1ea" stroke-width="26" fill="none" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="32" height="32">
+  <style>
+    :root { --plate: #2f6f57; --ink: #fbfaf8; }
+    @media (prefers-color-scheme: dark) {
+      :root { --plate: #171614; --ink: #6bbf98; }
+    }
+  </style>
+  <rect width="512" height="512" rx="112" fill="var(--plate)"/>
+  <path d="M197.4 48.6L277.9 48.6L277.9 145.2L356.1 145.2L356.1 225.7L277.9 225.7L277.9 322.3C277.9 368.3 300.9 391.3 342.3 391.3L392.9 391.3L392.9 471.8L335.4 471.8C243.4 471.8 197.4 421.2 197.4 326.9L197.4 225.7L119.2 225.7L119.2 145.2L197.4 145.2Z" fill="var(--ink)"/>
 </svg>

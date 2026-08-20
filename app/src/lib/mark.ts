@@ -108,3 +108,36 @@ export function tileMark(small = false): string {
   if (small) return letter(-28, -48, 1.15);
   return `${letter(-6, -26, 0.98)} ${pip(330, 322, 1)}`;
 }
+
+/**
+ * The box the mark actually occupies, measured from the path itself.
+ *
+ * Read out of the coordinates rather than written down beside them, so it
+ * cannot drift when the geometry is tuned. Curve control points count towards
+ * it, which over-estimates slightly — the safe side for the one caller, which
+ * is fitting the mark inside a circle it must not cross.
+ */
+export function markBounds(small = false): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  // Every command in these paths takes absolute coordinate pairs, so the
+  // numbers alternate x, y from the start.
+  const numbers = (tileMark(small).match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (let i = 0; i + 1 < numbers.length; i += 2) {
+    minX = Math.min(minX, numbers[i]);
+    maxX = Math.max(maxX, numbers[i]);
+    minY = Math.min(minY, numbers[i + 1]);
+    maxY = Math.max(maxY, numbers[i + 1]);
+  }
+
+  return { minX, minY, maxX, maxY };
+}

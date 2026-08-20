@@ -12,8 +12,17 @@
   color-scheme: light dark;
 }
 
+/*
+ * Dark, defined once and reached two ways: by the device's own setting, and by
+ * an explicit choice in the app.
+ *
+ * The media query is guarded so that choosing light beats a dark device — a
+ * preference the person stated outranks one their phone inferred — and the
+ * attribute rule comes after it so choosing dark beats a light device too.
+ * Neither block may hold a colour the other does not.
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #171614;
     --surface: #201e1b;
     --border: #35322d;
@@ -23,6 +32,30 @@
     --accent-soft: #21322a;
     --danger: #e08a76;
   }
+}
+
+:root[data-theme='dark'] {
+  --bg: #171614;
+  --surface: #201e1b;
+  --border: #35322d;
+  --fg: #f0ede7;
+  --fg-muted: #a09a90;
+  --accent: #6bbf98;
+  --accent-soft: #21322a;
+  --danger: #e08a76;
+}
+
+/*
+ * `color-scheme` follows the choice as well, so the controls the browser draws
+ * itself — scrollbars, form fields, the file picker — are not the one part of
+ * the page still in the other theme.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 * {
@@ -147,4 +180,148 @@ input[type='password'] {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--fg);
+}
+
+/*
+ * A settings hub: rows that each name one thing a person controls, say what it
+ * is set to, and open a page that does that one job.
+ *
+ * Global rather than scoped to the hub page because the same row is the right
+ * shape wherever a list of destinations appears.
+ */
+.hub {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.hub-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+
+.hub-row:hover {
+  border-color: var(--accent);
+}
+
+.hub-row .glyph,
+.hub-row .chevron {
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.hub-row .chevron {
+  color: var(--fg-muted);
+}
+
+.hub-row .text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.hub-row .text b {
+  font-weight: 550;
+}
+
+.hub-row .text span {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A row of mutually exclusive choices, sized to its container. */
+.segmented {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.segmented button {
+  flex: 1;
+  min-width: 0;
+  min-height: 2.4rem;
+  padding: 0 0.75rem;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--fg);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Label and control on one line, which is most of a settings page. */
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.setting .label small {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+}
+
+/* Key and value, divided, for pages that are mostly facts. */
+.facts {
+  margin: 0;
+}
+
+.facts .fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts .fact:last-child {
+  border-bottom: none;
+}
+
+.facts dt {
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+  /* Neither side may crush the other: the label wraps first, the value keeps
+     enough room to stay on one or two lines. */
+  flex: 1 1 40%;
+  min-width: 0;
+}
+
+.facts dt small {
+  display: block;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+
+.facts dd {
+  margin: 0;
+  flex: 1 1 55%;
+  text-align: right;
+  overflow-wrap: anywhere;
 }

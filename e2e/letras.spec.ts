@@ -105,7 +105,7 @@ test('a half-played game restores onto a fresh device with its rack intact', asy
   const boardNow = await mover.locator('.square.filled').count();
 
   // Export from the device that has been playing.
-  await mover.goto('/settings');
+  await mover.goto('/settings/backup');
   await mover.getByLabel('Passphrase').first().fill('correct horse battery staple');
   const download = mover.waitForEvent('download');
   await mover.getByRole('button', { name: 'Download backup' }).click();
@@ -114,7 +114,7 @@ test('a half-played game restores onto a fresh device with its rack intact', asy
   // A brand new profile: different identity, empty database.
   const replacement = await browser!.newContext();
   const c = await replacement.newPage();
-  await c.goto('/settings');
+  await c.goto('/settings/backup');
   await c.locator('input[type="file"]').setInputFiles(file!);
   await c.getByLabel('Passphrase').nth(1).fill('correct horse battery staple');
   await c.getByRole('button', { name: 'Restore' }).click();

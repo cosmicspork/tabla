@@ -48,15 +48,28 @@ async function playedGame(browser: BrowserContext['browser']) {
   return { alice, bob, a, b };
 }
 
+/**
+ * This device's whole public key.
+ *
+ * Behind a disclosure on the profile page: confirming a fingerprint out loud is
+ * what a person needs, and the full key is for when they want to be certain.
+ */
+async function readKey(page: Page): Promise<string> {
+  await page.goto('/settings/profile');
+  await page.getByRole('button', { name: 'Show the whole key' }).click();
+  const key = page.getByTestId('full-key');
+  await expect(key).not.toBeEmpty();
+  return (await key.textContent())!.trim();
+}
+
 test('a backup restores into a fresh profile and the game continues', async ({ browser }) => {
   const { alice, bob, a, b } = await playedGame(browser);
 
   // Alice's public key before the migration, to prove the identity moved.
-  await a.goto('/settings');
-  await expect(a.locator('.key')).not.toBeEmpty();
-  const originalKey = (await a.locator('.key').textContent())!.trim();
+  const originalKey = await readKey(a);
 
   // Export.
+  await a.goto('/settings/backup');
   await a.getByLabel('Passphrase').first().fill(PASSPHRASE);
   const download = a.waitForEvent('download');
   await a.getByRole('button', { name: 'Download backup' }).click();
@@ -66,12 +79,11 @@ test('a backup restores into a fresh profile and the game continues', async ({ b
   // A brand new device: nothing in storage, a different identity.
   const replacement = await browser.newContext();
   const c = await newPlayer(replacement);
-  await c.goto('/settings');
-  await expect(c.locator('.key')).not.toBeEmpty();
-  const strangerKey = (await c.locator('.key').textContent())!.trim();
+  const strangerKey = await readKey(c);
   expect(strangerKey).not.toBe(originalKey);
 
   // Restore.
+  await c.goto('/settings/backup');
   await c.locator('input[type="file"]').setInputFiles(file!);
   await c.getByLabel('Passphrase').nth(1).fill(PASSPHRASE);
   await c.getByRole('button', { name: 'Restore' }).click();
@@ -79,8 +91,7 @@ test('a backup restores into a fresh profile and the game continues', async ({ b
   await expect(c.getByText(/Restored 1 game/)).toBeVisible();
 
   // The identity came with it.
-  await c.reload();
-  await expect(c.locator('.key')).toHaveText(originalKey);
+  expect(await readKey(c)).toBe(originalKey);
 
   // And the game is playable from the new device: the restored log verified,
   // decrypted, and replayed, which it could not do without the identity key.
@@ -104,7 +115,7 @@ test('a backup restores into a fresh profile and the game continues', async ({ b
 test('a backup will not open with the wrong passphrase', async ({ browser }) => {
   const { alice, bob, a } = await playedGame(browser);
 
-  await a.goto('/settings');
+  await a.goto('/settings/backup');
   await a.getByLabel('Passphrase').first().fill(PASSPHRASE);
   const download = a.waitForEvent('download');
   await a.getByRole('button', { name: 'Download backup' }).click();
@@ -112,7 +123,7 @@ test('a backup will not open with the wrong passphrase', async ({ browser }) => 
 
   const other = await browser.newContext();
   const c = await newPlayer(other);
-  await c.goto('/settings');
+  await c.goto('/settings/backup');
   await c.locator('input[type="file"]').setInputFiles(file!);
   await c.getByLabel('Passphrase').nth(1).fill('not the passphrase');
   await c.getByRole('button', { name: 'Restore' }).click();
