@@ -89,6 +89,27 @@ export class GameRoomDO extends DurableObject<Env> {
           last_seen INTEGER NOT NULL
         )
       `);
+      // One row per device, not per participant: someone playing from a phone
+      // and a laptop wants telling on both, and the older single `push_sub`
+      // column silently let whichever subscribed last take the other's place.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS push_endpoint (
+          key_hash TEXT NOT NULL,
+          endpoint TEXT NOT NULL,
+          sub      TEXT NOT NULL,
+          PRIMARY KEY (key_hash, endpoint)
+        )
+      `);
+      // A claim on the next move, passed between one player's own devices. The
+      // body is sealed under the game key; this object routes it and cannot
+      // read it. Never part of the log, and dropped with the room.
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS hold (
+          key_hash TEXT PRIMARY KEY,
+          body     TEXT NOT NULL,
+          until    INTEGER NOT NULL
+        )
+      `);
       // Never deleted. This is what makes eviction safe.
       sql.exec(`
         CREATE TABLE IF NOT EXISTS tombstone (
@@ -326,8 +347,19 @@ export class GameRoomDO extends DurableObject<Env> {
         return this.onReq(ws, message.data.fromSeq);
       case 'push_sub':
         if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
-        await this.setPushSubscription(attachment.keyHash, message.data.subscription, now);
+        await this.setPushSubscription(
+          attachment.keyHash,
+          message.data.subscription,
+          now,
+          message.data.endpoint,
+        );
         return;
+      case 'hold':
+        if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
+        return this.onHold(ws, attachment.keyHash, message.data.body, now + message.data.ttlMs);
+      case 'release':
+        if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
+        return this.onHold(ws, attachment.keyHash, null, 0);
     }
   }
 
@@ -356,6 +388,50 @@ export class GameRoomDO extends DurableObject<Env> {
     });
 
     this.broadcastPresence();
+
+    // A device that opens a game already being played on another of this
+    // person's devices should say so before it draws a board they cannot use.
+    const held = this.holdFor(hello.keyHash, now);
+    if (held) this.send(ws, { t: 'hold', body: held.body, until: held.until });
+  }
+
+  /**
+   * Passes a claim on the turn between one player's own devices.
+   *
+   * It reaches nothing else. Which of someone's devices is thinking is not the
+   * opponent's business, and the relay cannot read the body it is forwarding.
+   */
+  private onHold(ws: WebSocket, keyHash: string, body: string | null, until: number): void {
+    if (body === null) {
+      this.ctx.storage.sql.exec(`DELETE FROM hold WHERE key_hash = ?`, keyHash);
+    } else {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO hold (key_hash, body, until) VALUES (?, ?, ?)
+           ON CONFLICT(key_hash) DO UPDATE SET body = excluded.body, until = excluded.until`,
+        keyHash,
+        body,
+        until,
+      );
+    }
+
+    for (const other of this.ctx.getWebSockets()) {
+      if (other === ws) continue;
+      if (this.attachmentOf(other).keyHash !== keyHash) continue;
+      this.send(other, { t: 'hold', body, until });
+    }
+  }
+
+  /** The unexpired hold on this participant's turn, if there is one. */
+  private holdFor(keyHash: string, now: number): { body: string; until: number } | null {
+    const row = this.ctx.storage.sql
+      .exec<{ body: string; until: number }>(
+        `SELECT body, until FROM hold WHERE key_hash = ? AND until > ?`,
+        keyHash,
+        now,
+      )
+      .toArray()[0];
+
+    return row ?? null;
   }
 
   private async onAppend(
@@ -375,13 +451,16 @@ export class GameRoomDO extends DurableObject<Env> {
 
     this.send(ws, { t: 'appended', tipSeq: result.tipSeq, tipHash: result.tipHash! });
 
-    // Hand the new entries straight to the opponent if they are here, so a live
-    // game does not need a round trip to notice a move.
+    // The move ends whatever claim was on it.
+    this.onHold(ws, attachment.keyHash, null, 0);
+
+    // Hand the new entries straight to every other socket, so a live game does
+    // not need a round trip to notice a move. That includes this player's own
+    // other devices: they need the move as much as the opponent does, and used
+    // to be skipped back when a second device could not exist.
     const fanout = append.entries;
     for (const other of this.ctx.getWebSockets()) {
       if (other === ws) continue;
-      const theirs = this.attachmentOf(other);
-      if (theirs.keyHash === attachment.keyHash) continue;
       this.send(other, { t: 'entries', fromSeq: fanout[0]?.seq ?? 0, entries: fanout });
     }
   }
@@ -392,8 +471,12 @@ export class GameRoomDO extends DurableObject<Env> {
   }
 
   async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
-    // 1006 is never a legal close code to send back.
-    ws.close(code === 1006 ? 1000 : code, reason);
+    // Some codes are reported to a handler but may never be *sent*: 1005 for a
+    // close carrying no code at all, which is what a browser does when a page
+    // navigates away, and 1006 for a connection that dropped. Echoing either
+    // throws, and the throw surfaces as an unhandled rejection in the room
+    // rather than anywhere a person would see it.
+    ws.close(sendableCloseCode(code), reason);
     this.broadcastPresence(ws);
   }
 
@@ -479,11 +562,12 @@ export class GameRoomDO extends DurableObject<Env> {
       const outcome = await sendPush(this.env, subscription, { gameId });
       this.recordPushAttempt(outcome);
 
-      // A dead endpoint is dropped rather than retried forever.
+      // A dead endpoint is dropped rather than retried forever — that one
+      // device's, not the participant's: their other devices are still there.
       if (outcome.expired) {
         this.ctx.storage.sql.exec(
-          `UPDATE participant SET push_sub = NULL WHERE push_sub = ?`,
-          JSON.stringify(subscription),
+          `DELETE FROM push_endpoint WHERE endpoint = ?`,
+          subscription.endpoint,
         );
       }
     }
@@ -506,28 +590,87 @@ export class GameRoomDO extends DurableObject<Env> {
     );
   }
 
+  /**
+   * Registers, or removes, one device's push subscription.
+   *
+   * Keyed by endpoint, so a person's phone and laptop both stay subscribed. A
+   * null subscription needs the endpoint it is retiring, since by then the
+   * client has already unsubscribed and cannot produce the rest.
+   */
   async setPushSubscription(
     keyHash: string,
     subscription: PushSubscriptionJson | null,
     now: number,
+    endpoint?: string,
   ): Promise<void> {
     this.touch(keyHash, now);
+    this.migrateLegacySubscription(keyHash);
+
+    if (subscription === null) {
+      if (endpoint) {
+        this.ctx.storage.sql.exec(
+          `DELETE FROM push_endpoint WHERE key_hash = ? AND endpoint = ?`,
+          keyHash,
+          endpoint,
+        );
+      }
+      return;
+    }
+
     this.ctx.storage.sql.exec(
-      `UPDATE participant SET push_sub = ? WHERE key_hash = ?`,
-      subscription === null ? null : JSON.stringify(subscription),
+      `INSERT INTO push_endpoint (key_hash, endpoint, sub) VALUES (?, ?, ?)
+         ON CONFLICT(key_hash, endpoint) DO UPDATE SET sub = excluded.sub`,
+      keyHash,
+      subscription.endpoint,
+      JSON.stringify(subscription),
+    );
+  }
+
+  /**
+   * Moves a subscription written before there was a table for them.
+   *
+   * Rooms in flight when this shipped have one in the old column. Left there it
+   * would simply stop receiving pushes, which is exactly the kind of failure
+   * nobody reports — they just never hear about their turn again.
+   */
+  private migrateLegacySubscription(keyHash: string): void {
+    const row = this.ctx.storage.sql
+      .exec<{ push_sub: string | null }>(
+        `SELECT push_sub FROM participant WHERE key_hash = ? AND push_sub IS NOT NULL`,
+        keyHash,
+      )
+      .toArray()[0];
+    if (!row?.push_sub) return;
+
+    const legacy = JSON.parse(row.push_sub) as PushSubscriptionJson;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO push_endpoint (key_hash, endpoint, sub) VALUES (?, ?, ?)
+         ON CONFLICT(key_hash, endpoint) DO NOTHING`,
+      keyHash,
+      legacy.endpoint,
+      row.push_sub,
+    );
+    this.ctx.storage.sql.exec(
+      `UPDATE participant SET push_sub = NULL WHERE key_hash = ?`,
       keyHash,
     );
   }
 
-  /** Everyone in this game other than `keyHash` who has a push subscription. */
+  /** Every device of everyone in this game other than `keyHash`. */
   private opponentSubscriptions(keyHash: string): PushSubscriptionJson[] {
-    return this.ctx.storage.sql
-      .exec<{ push_sub: string | null }>(
-        `SELECT push_sub FROM participant WHERE key_hash != ? AND push_sub IS NOT NULL`,
+    for (const row of this.ctx.storage.sql
+      .exec<{ key_hash: string }>(
+        `SELECT key_hash FROM participant WHERE key_hash != ? AND push_sub IS NOT NULL`,
         keyHash,
       )
+      .toArray()) {
+      this.migrateLegacySubscription(row.key_hash);
+    }
+
+    return this.ctx.storage.sql
+      .exec<{ sub: string }>(`SELECT sub FROM push_endpoint WHERE key_hash != ?`, keyHash)
       .toArray()
-      .map((row) => JSON.parse(row.push_sub!) as PushSubscriptionJson);
+      .map((row) => JSON.parse(row.sub) as PushSubscriptionJson);
   }
 
   private participantKeyHashes(): string[] {
@@ -615,6 +758,8 @@ export class GameRoomDO extends DurableObject<Env> {
 
     this.ctx.storage.sql.exec(`DELETE FROM log`);
     this.ctx.storage.sql.exec(`DELETE FROM participant`);
+    this.ctx.storage.sql.exec(`DELETE FROM push_endpoint`);
+    this.ctx.storage.sql.exec(`DELETE FROM hold`);
     this.ctx.storage.sql.exec(`DELETE FROM meta WHERE k IN ('reminderAt', 'retentionAt')`);
     await this.ctx.storage.deleteAlarm();
   }
@@ -638,4 +783,17 @@ function bufferOf(bytes: Uint8Array): ArrayBuffer {
     bytes.byteOffset,
     bytes.byteOffset + bytes.byteLength,
   ) as ArrayBuffer;
+}
+
+/**
+ * The nearest code to `code` that a close frame may actually carry.
+ *
+ * The reserved range and the two "no real code" sentinels are reported to a
+ * handler but rejected when sent, so anything outside what the spec allows
+ * becomes a plain normal closure.
+ */
+function sendableCloseCode(code: number): number {
+  const allowed = (code >= 1000 && code <= 1003) || (code >= 1007 && code <= 1011) ||
+    (code >= 3000 && code <= 4999);
+  return allowed ? code : 1000;
 }

@@ -6,6 +6,8 @@
  */
 import { z } from 'zod';
 
+import { HOLD_MAX_MS, LINK_MAX_BYTES } from './constants.ts';
+
 /** base64url without padding, as used for every binary field on the wire. */
 const b64url = z.string().regex(/^[A-Za-z0-9_-]*$/, 'expected unpadded base64url');
 
@@ -89,7 +91,30 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
   }),
   z.object({ t: z.literal('append'), entries: z.array(wireEntrySchema).max(256) }),
   z.object({ t: z.literal('req'), fromSeq: z.number().int().nonnegative() }),
-  z.object({ t: z.literal('push_sub'), subscription: pushSubscriptionSchema }),
+  /**
+   * Registers this device for content-free pushes about this game, or retires
+   * it. `endpoint` is only for retiring: by then the browser subscription is
+   * already gone and its endpoint is all the client can still name.
+   */
+  z.object({
+    t: z.literal('push_sub'),
+    subscription: pushSubscriptionSchema.nullable(),
+    endpoint: z.string().optional(),
+  }),
+  /**
+   * Claims the next move for this device, for `ttlMs`.
+   *
+   * Goes only to this participant's *other* sockets — the opponent is never
+   * told, because it is not their business which of someone's devices is
+   * thinking. `body` is a sealed hold token; the relay routes it and cannot
+   * read it.
+   */
+  z.object({
+    t: z.literal('hold'),
+    body: b64url.max(128),
+    ttlMs: z.number().int().positive().max(HOLD_MAX_MS),
+  }),
+  z.object({ t: z.literal('release') }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
 
@@ -111,6 +136,17 @@ export const serverMessageSchema = z.discriminatedUnion('t', [
    * so out loud reveals no more than the fan-out already does.
    */
   z.object({ t: z.literal('presence'), others: z.number().int().nonnegative() }),
+  /**
+   * Another of this player's own devices has the turn, until `until`.
+   *
+   * `body: null` withdraws it. Sent on connect too, so a device that opens a
+   * game already being played elsewhere says so before it draws a board.
+   */
+  z.object({
+    t: z.literal('hold'),
+    body: b64url.max(128).nullable(),
+    until: z.number().int(),
+  }),
   z.object({ t: z.literal('err'), code: z.string(), detail: z.string().optional() }),
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
@@ -127,6 +163,8 @@ export const ErrorCode = {
   NotFound: 'not_found',
   Forbidden: 'forbidden',
   MailboxFull: 'mailbox_full',
+  /** A link id is already in use. The words that named it must be redrawn. */
+  Conflict: 'conflict',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -175,6 +213,45 @@ export const pollMailboxResponseSchema = z.object({
 export const mailboxPushRequestSchema = z.object({
   subscription: pushSubscriptionSchema,
 });
+
+// ---------------------------------------------------------------------------
+// Device links
+// ---------------------------------------------------------------------------
+
+/**
+ * Handing an identity to another of your own devices.
+ *
+ * The same shape as an invite — a sealed blob the relay holds and cannot read —
+ * with three differences that follow from what it carries. The id is derived by
+ * the client from the words it shows the person, so the relay never chooses it
+ * and cannot enumerate what it holds. It lasts minutes rather than days. And it
+ * is deleted when taken, rather than marked as claimed, because unlike an
+ * invite there is nobody left to poll for who took it.
+ */
+export const linkIdSchema = b64url.length(22, 'linkId is 16 bytes in base64url');
+
+export const createLinkRequestSchema = z.object({
+  linkId: linkIdSchema,
+  /** An export bundle, sealed under the six words. Large: it is an installation. */
+  blob: b64url.max(Math.ceil((LINK_MAX_BYTES * 4) / 3) + 4),
+});
+export const createLinkResponseSchema = z.object({
+  expiresAt: z.number().int(),
+  /** Withdraws the link. Handed back once, exactly as an invite's is. */
+  cancelToken: b64url.length(22),
+});
+
+export const cancelLinkRequestSchema = z.object({
+  cancelToken: b64url.length(22),
+});
+
+/** What the offering device polls, to know when to stop showing the words. */
+export const linkStatusSchema = z.object({
+  taken: z.boolean(),
+  expiresAt: z.number().int(),
+});
+
+export const takeLinkResponseSchema = z.object({ blob: b64url });
 
 // ---------------------------------------------------------------------------
 // Push

@@ -10,6 +10,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { ErrorCode, INVITE_TTL_MS, toBase64Url } from '@tabla/shared';
 
 import type { Env } from './env.ts';
+import { constantTimeEqual } from './util.ts';
 
 export interface ClaimResult {
   ok: boolean;
@@ -152,18 +153,4 @@ export class PendingInviteDO extends DurableObject<Env> {
   async alarm(): Promise<void> {
     this.ctx.storage.sql.exec(`DELETE FROM invite`);
   }
-}
-
-/**
- * Compares two tokens without leaking where they first differ.
- *
- * Both are base64url of the same length by schema, so comparing bytes is safe
- * and the length check is a formality rather than an early exit worth hiding.
- */
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-
-  let difference = 0;
-  for (let i = 0; i < a.length; i += 1) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return difference === 0;
 }

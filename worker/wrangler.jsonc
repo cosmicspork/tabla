@@ -19,7 +19,8 @@
     "bindings": [
       { "name": "GAME_ROOMS", "class_name": "GameRoomDO" },
       { "name": "INVITES", "class_name": "PendingInviteDO" },
-      { "name": "MAILBOXES", "class_name": "MailboxDO" }
+      { "name": "MAILBOXES", "class_name": "MailboxDO" },
+      { "name": "LINKS", "class_name": "DeviceLinkDO" }
     ]
   },
 
@@ -33,6 +34,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["MailboxDO"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["DeviceLinkDO"]
     }
   ],
 
