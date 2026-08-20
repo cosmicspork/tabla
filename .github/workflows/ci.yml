@@ -55,7 +55,7 @@ jobs:
       - run: just check-ts
       - run: just test-ts
 
-  e2e:
+  e2e-shard:
     runs-on: ubuntu-latest
     # Split in two because a full run does not fit. Chromium holds around four
     # gigabytes across a suite this size and the Worker another gigabyte, which
@@ -106,3 +106,16 @@ jobs:
             test-results
             ~/.config/.wrangler/logs
           retention-days: 7
+
+  # The shards report as `e2e (1)` and `e2e (2)`, which no branch rule can name
+  # ahead of time. This is the check that can be required: one name, green only
+  # if every shard was.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: e2e-shard
+    if: always()
+    steps:
+      - name: Check the shards
+        run: |
+          echo "shards: ${{ needs.e2e-shard.result }}"
+          [ "${{ needs.e2e-shard.result }}" = "success" ]
