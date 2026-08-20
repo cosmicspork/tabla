@@ -9,8 +9,11 @@
    */
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
+  import { displayName, MAX_NAME_LENGTH, setDisplayName } from '$lib/profile.ts';
 
   let key = $state('');
+  let name = $state('');
+  let saved = $state(false);
   let showingFull = $state(false);
 
   $effect(() => {
@@ -20,11 +23,47 @@
   $effect(() => {
     void (async () => {
       key = await myPublicKey();
+      name = await displayName();
     })();
   });
+
+  async function save() {
+    await setDisplayName(name);
+    saved = true;
+    setTimeout(() => (saved = false), 2000);
+  }
 </script>
 
 <div class="stack">
+  <section class="card stack">
+    <div>
+      <h2>Your name</h2>
+      <p class="muted">
+        Shown to the people you play, so a game can be called “Letras with Pooja”. It travels sealed
+        inside the invite and the game's own log — never to the relay.
+      </p>
+    </div>
+    <label>
+      <span class="muted">Display name</span>
+      <input
+        bind:value={name}
+        maxlength={MAX_NAME_LENGTH}
+        autocomplete="nickname"
+        placeholder="Josh"
+        data-testid="display-name"
+      />
+    </label>
+    <p class="muted small">
+      Not a login and not unique: two people can pick the same one, nothing checks it, and whoever
+      you play can rename you on their own device. The fingerprint below is the part that identifies
+      you.
+    </p>
+    <div class="row">
+      <button class="primary" onclick={save}>Save</button>
+      {#if saved}<span class="muted" data-testid="name-saved">Saved.</span>{/if}
+    </div>
+  </section>
+
   <section class="card stack">
     <div>
       <h2>Your fingerprint</h2>
@@ -55,6 +94,17 @@
 </div>
 
 <style>
+  label {
+    display: grid;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+  }
+
+  .small {
+    font-size: 0.8rem;
+    margin: 0;
+  }
+
   .print {
     font-size: 1.05rem;
     letter-spacing: 0.04em;

@@ -183,7 +183,7 @@ describe('two clients playing through the relay', () => {
     await connected(bob);
 
     // Prologue: the claimer joins, the initiator writes the configuration.
-    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
+    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey(), ''));
     await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
     await reaches(bob, 1);
@@ -223,7 +223,7 @@ describe('two clients playing through the relay', () => {
 
     await bob.engine.connect();
     await connected(bob);
-    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
+    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey(), ''));
     await flushed(bob);
     bob.engine.disconnect();
 
@@ -250,7 +250,7 @@ describe('two clients playing through the relay', () => {
 
     await bob.engine.connect();
     await connected(bob);
-    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
+    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey(), ''));
     await flushed(bob);
     bob.engine.disconnect();
 
@@ -278,7 +278,7 @@ describe('surviving relay eviction', () => {
     await connected(alice);
     await connected(bob);
 
-    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
+    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey(), ''));
     await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
     await reaches(bob, 1);
@@ -333,7 +333,7 @@ describe('surviving relay eviction', () => {
     await connected(alice);
     await connected(bob);
 
-    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
+    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey(), ''));
     await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
     await reaches(bob, 1);
@@ -365,7 +365,7 @@ describe('surviving relay eviction', () => {
     await connected(alice);
     await connected(bob);
 
-    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey()));
+    bob.engine.appendLocal(bob.identity, bob.session.sealJoin(nonce(0), bob.identity.publicKey(), ''));
     await reaches(alice, 0);
     alice.engine.appendLocal(alice.identity, alice.session.sealSetup(nonce(1), new Uint8Array()));
     await reaches(bob, 1);

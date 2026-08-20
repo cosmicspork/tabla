@@ -223,6 +223,12 @@ impl Invite {
         self.inner.created_at
     }
 
+    /// What the initiator asked to be called. Empty from a build without names.
+    #[wasm_bindgen(getter)]
+    pub fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
     /// Whether this build can play the game described.
     ///
     /// A mismatch must be refused before the first move: two clients validating
@@ -260,6 +266,7 @@ pub fn seal_invite(
     initiator_public_key: &[u8],
     seed: &[u8],
     created_at: u64,
+    name: &str,
 ) -> Result<Vec<u8>, JsError> {
     let config = InviteConfig {
         v: invite::INVITE_VERSION,
@@ -273,6 +280,7 @@ pub fn seal_invite(
         initiator_pub_key: fixed::<PUBKEY_LEN>(initiator_public_key, "public key")?,
         seed: fixed::<32>(seed, "seed")?,
         created_at,
+        name: InviteConfig::clean_name(name),
     };
 
     config
@@ -330,10 +338,27 @@ impl Session {
     }
 
     /// Sequence 0: the claimer binds their identity to the game.
+    ///
+    /// With a name when there is one to give, and without when there is not —
+    /// the older variant is still what a build with no names writes, and still
+    /// what every game begun before them has at sequence 0.
     #[wasm_bindgen(js_name = sealJoin)]
-    pub fn seal_join(&self, nonce: &[u8], claimer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
-        let body = EntryBody::Join {
-            claimer_pub_key: fixed::<PUBKEY_LEN>(claimer_public_key, "claimer key")?,
+    pub fn seal_join(
+        &self,
+        nonce: &[u8],
+        claimer_public_key: &[u8],
+        name: &str,
+    ) -> Result<Vec<u8>, JsError> {
+        let claimer_pub_key = fixed::<PUBKEY_LEN>(claimer_public_key, "claimer key")?;
+        let cleaned = InviteConfig::clean_name(name);
+
+        let body = if cleaned.is_empty() {
+            EntryBody::Join { claimer_pub_key }
+        } else {
+            EntryBody::JoinAs {
+                claimer_pub_key,
+                name: cleaned,
+            }
         };
         self.seal(0, nonce, &body)
     }
@@ -507,6 +532,7 @@ impl Log {
             moves: replayed.moves,
             config: replayed.config,
             resigned_by: replayed.resigned_by.map(|r| r.player_index()),
+            claimer_name: replayed.claimer_name,
         })
     }
 
@@ -529,6 +555,7 @@ pub struct Replay {
     moves: Vec<Vec<u8>>,
     config: Option<Vec<u8>>,
     resigned_by: Option<u8>,
+    claimer_name: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -551,6 +578,15 @@ impl Replay {
     #[wasm_bindgen(getter)]
     pub fn config(&self) -> Option<Vec<u8>> {
         self.config.clone()
+    }
+
+    /// What the claimer asked to be called, from their `Join` entry.
+    ///
+    /// Read out of the log rather than taken from the relay, which never saw
+    /// it. `undefined` for a game begun before names, or a player without one.
+    #[wasm_bindgen(getter, js_name = claimerName)]
+    pub fn claimer_name(&self) -> Option<String> {
+        self.claimer_name.clone()
     }
 
     /// Player index of whoever resigned, or `undefined` if nobody did.

@@ -50,6 +50,13 @@ export interface GameRecord {
    * would be storing a secret for no reason.
    */
   cancelToken?: string;
+  /**
+   * The contact this invite was addressed to, when it was made from the list.
+   *
+   * Kept so the claim can be checked against it: the link is a bearer token, so
+   * intending to invite one person is no guarantee about who opens it.
+   */
+  invitedContact?: string;
   pluginId: string;
   pluginVersion: number;
   role: Role;

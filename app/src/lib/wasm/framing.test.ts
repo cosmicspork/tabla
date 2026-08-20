@@ -45,7 +45,7 @@ function realChain(count: number): {
   const session = new core.Session(GAME_ID, key, alice.publicKey(), bob.publicKey());
   const log = new core.Log(GAME_ID, alice.publicKey(), bob.publicKey());
 
-  log.appendSigned(bob, session.sealJoin(new Uint8Array(24).fill(0), bob.publicKey()));
+  log.appendSigned(bob, session.sealJoin(new Uint8Array(24).fill(0), bob.publicKey(), ''));
   if (count > 1) {
     log.appendSigned(alice, session.sealSetup(new Uint8Array(24).fill(1), new Uint8Array()));
   }

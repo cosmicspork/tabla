@@ -431,10 +431,115 @@ fn an_undecryptable_entry_is_reported_not_ignored() {
     );
 }
 
+#[test]
+fn a_claimer_may_introduce_itself_by_name() {
+    let (a, b) = (&initiator(), &claimer());
+    let s = session_for(a, b);
+    let mut entries = Vec::new();
+    let mut prev = GENESIS_PREV_HASH;
+
+    let mut append = |body: &EntryBody, seq: u32, who: &Identity, prev: &mut [u8; 32]| {
+        let payload = s.seal_body(seq, &nonce(seq as u8), body).unwrap();
+        let e = Entry::sign(who.signing_key(), seq, *prev, GAME, payload);
+        *prev = e.hash();
+        entries.push(e);
+    };
+
+    append(
+        &EntryBody::JoinAs {
+            claimer_pub_key: b.public_key(),
+            name: "Pooja".into(),
+        },
+        0,
+        b,
+        &mut prev,
+    );
+    append(
+        &EntryBody::Setup {
+            config: b"cfg".to_vec(),
+        },
+        1,
+        a,
+        &mut prev,
+    );
+
+    let replayed = s.replay(&entries).unwrap();
+    // The initiator learns it from the log, never from the relay.
+    assert_eq!(replayed.claimer_name.as_deref(), Some("Pooja"));
+}
+
+#[test]
+fn a_named_join_still_has_to_be_the_key_the_game_is_bound_to() {
+    // A name is a label, and labels prove nothing: the same check applies.
+    let (a, b) = (&initiator(), &claimer());
+    let s = session_for(a, b);
+    let stranger = Identity::from_seed(&[0x5A; 32]);
+
+    let payload = s
+        .seal_body(
+            0,
+            &nonce(0),
+            &EntryBody::JoinAs {
+                claimer_pub_key: stranger.public_key(),
+                name: "Pooja".into(),
+            },
+        )
+        .unwrap();
+    let entry = Entry::sign(b.signing_key(), 0, GENESIS_PREV_HASH, GAME, payload);
+
+    assert_eq!(s.replay(&[entry]), Err(SessionError::JoinKeyMismatch));
+    let _ = a;
+}
+
+#[test]
+fn a_game_begun_before_names_replays_unchanged() {
+    // Every game in progress has an unnamed Join at sequence 0. Reading those
+    // is not optional, which is why the name is a new variant rather than a
+    // field on the old one.
+    let (a, b) = (&initiator(), &claimer());
+    let (session, entries) = play(a, b, &[b"one", b"two"]);
+
+    let replayed = session.replay(&entries).unwrap();
+    assert_eq!(replayed.moves.len(), 2);
+    assert_eq!(replayed.claimer_name, None);
+}
+
 // -- invites ----------------------------------------------------------------
 
 fn config_for(a: &Identity) -> InviteConfig {
     InviteConfig {
+        v: tabla_core::invite::INVITE_VERSION,
+        game_id: GAME,
+        plugin_id: "tictactoe".into(),
+        plugin_version: 1,
+        dictionary_hash: None,
+        initiator_pub_key: a.public_key(),
+        seed: [9u8; 32],
+        created_at: 1_780_000_000,
+        name: "Ada".into(),
+    }
+}
+
+/// The exact shape version 1 had, so a blob written by that build can be
+/// constructed here without that build being present.
+#[derive(serde::Serialize)]
+struct InviteConfigV1Fixture {
+    v: u16,
+    game_id: [u8; 16],
+    plugin_id: String,
+    plugin_version: u32,
+    dictionary_hash: Option<[u8; 32]>,
+    initiator_pub_key: [u8; 32],
+    seed: [u8; 32],
+    created_at: u64,
+}
+
+#[test]
+fn an_invite_from_before_names_still_opens() {
+    // Seven days of invites are in the wild at any moment. A field added to the
+    // format must not turn one of them into a dead link.
+    let a = initiator();
+    let old = InviteConfigV1Fixture {
         v: 1,
         game_id: GAME,
         plugin_id: "tictactoe".into(),
@@ -443,7 +548,28 @@ fn config_for(a: &Identity) -> InviteConfig {
         initiator_pub_key: a.public_key(),
         seed: [9u8; 32],
         created_at: 1_780_000_000,
-    }
+    };
+
+    let key = [0x2B; 32];
+    let plaintext = postcard::to_allocvec(&old).unwrap();
+    let blob = tabla_core::seal::seal(&key, &nonce(1), tabla_core::invite::INVITE_AAD, &plaintext)
+        .unwrap();
+
+    let opened = InviteConfig::open(&key, &blob).unwrap();
+    assert_eq!(opened.plugin_id, "tictactoe");
+    assert_eq!(opened.initiator_pub_key, a.public_key());
+    // Nobody was called anything then, and pretending otherwise would be worse
+    // than an empty name.
+    assert_eq!(opened.name, "");
+}
+
+#[test]
+fn a_name_longer_than_the_limit_is_cut_rather_than_refused() {
+    // Refused would mean a link that fails at the far end, for the person who
+    // did not choose the name.
+    let cleaned = InviteConfig::clean_name(&"a".repeat(200));
+    assert_eq!(cleaned.len(), tabla_core::invite::MAX_NAME_LEN);
+    assert_eq!(InviteConfig::clean_name("  Ada  "), "Ada");
 }
 
 #[test]

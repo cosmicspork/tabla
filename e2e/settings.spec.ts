@@ -7,7 +7,7 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { startGame } from './helpers.ts';
+import { introduce, inviteLink, startGame } from './helpers.ts';
 
 test('every row opens the page it names, and back returns to the hub', async ({ browser }) => {
   const context = await browser.newContext();
@@ -83,6 +83,77 @@ test('renaming someone sticks, and the hub says so', async ({ browser }) => {
   // The hub reads its summaries from the data, so it knows without being told.
   await a.goto('/settings');
   await expect(a.getByRole('link', { name: /People/ })).toContainText('Pooja');
+
+  await one.close();
+  await two.close();
+});
+
+test('a name travels to the other player, in both directions', async ({ browser }) => {
+  const one = await browser.newContext();
+  const two = await browser.newContext();
+
+  const a = await one.newPage();
+  const b = await two.newPage();
+
+  // Both players say what they would like to be called before playing.
+  await a.goto('/');
+  await introduce(a, 'Ada');
+  await b.goto('/');
+  await introduce(b, 'Pooja');
+
+  await a.getByRole('link', { name: 'Start a new game' }).click();
+  await a.locator('button[data-game="tictactoe"]').click();
+  await a.getByRole('button', { name: /Make an invite link/ }).click();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  const link = await inviteLink(a);
+
+  await b.goto(link);
+  await expect(b.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  // The claimer learns the initiator's name from the sealed invite…
+  await b.goto('/');
+  await expect(b.getByText('Tic tac toe with Ada')).toBeVisible();
+
+  // …and the initiator learns the claimer's from the game's own log, which is
+  // the only place it could have come from: the relay never saw it.
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+  await a.goto('/');
+  await expect(a.getByText('Tic tac toe with Pooja')).toBeVisible({ timeout: 20_000 });
+
+  await one.close();
+  await two.close();
+});
+
+test('a game can be started against someone you have played before', async ({ browser }) => {
+  const one = await browser.newContext();
+  const two = await browser.newContext();
+
+  const a = await one.newPage();
+  const b = await two.newPage();
+
+  await a.goto('/');
+  await introduce(a, 'Ada');
+  await b.goto('/');
+  await introduce(b, 'Pooja');
+
+  await a.getByRole('link', { name: 'Start a new game' }).click();
+  await a.locator('button[data-game="tictactoe"]').click();
+  await a.getByRole('button', { name: /Make an invite link/ }).click();
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  await b.goto(await inviteLink(a));
+  await expect(a.locator('.board button')).toHaveCount(9, { timeout: 20_000 });
+
+  // Second game: they are on the list now, so it starts with who rather than
+  // with a link nobody is addressed by.
+  await a.goto('/new');
+  await a.getByText('Pooja').click();
+  await a.locator('button[data-game="tictactoe"]').click();
+  await a.getByRole('button', { name: 'Invite Pooja' }).click();
+
+  // Named from the moment it exists, before anyone has claimed anything.
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  await a.goto('/');
+  await expect(a.getByText('Tic tac toe with Pooja')).toHaveCount(2);
 
   await one.close();
   await two.close();

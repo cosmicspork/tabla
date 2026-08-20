@@ -165,6 +165,10 @@ export async function rememberContact(publicKey: string, name: string, now: numb
   } satisfies ContactRecord);
 }
 
+export async function getContact(publicKey: string): Promise<ContactRecord | undefined> {
+  return (await db()).get('contacts', publicKey);
+}
+
 export async function listContacts(): Promise<ContactRecord[]> {
   const all = await (await db()).getAll('contacts');
   return all.toSorted((a, b) => b.lastPlayed - a.lastPlayed);

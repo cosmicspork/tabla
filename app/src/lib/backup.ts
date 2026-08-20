@@ -15,6 +15,7 @@ import { db } from './db/schema.ts';
 import type { GameRecord } from './db/schema.ts';
 import { listContacts, listGames, loadEntries } from './db/store.ts';
 import { loadIdentity, randomBytes, replaceIdentity } from './identity.ts';
+import { markOnboarded } from './profile.ts';
 
 export const BACKUP_EXTENSION = '.tabla';
 
@@ -143,6 +144,9 @@ export async function importBackup(passphrase: string, file: Uint8Array): Promis
 
   await tx.done;
   await replaceIdentity(seed);
+  // A device that has just been handed an identity and a history has plainly
+  // been introduced; asking it who it is would be absurd.
+  await markOnboarded();
 
   return {
     games: bundle.games.length,

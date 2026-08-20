@@ -63,6 +63,12 @@ After the first completed handshake with a peer, their public key is saved to a
 local contacts list, so later games start from a contact picker. Invite links
 are the bootstrap, not the ongoing flow.
 
+Starting a game asks who before what, and an invite addressed to a contact
+records who it was meant for. That is an intention rather than a fact — the link
+is a bearer token, and whoever opens it first is the opponent — so if a
+different key claims it, the name is dropped and the real one is taken from
+their prologue entry instead.
+
 ## The game log
 
 Every game is a **signed, hash-chained, append-only log**. Both clients hold the
@@ -228,12 +234,45 @@ struct InviteConfig {
     initiator_pub_key: [u8; 32],
     seed: [u8; 32],
     created_at: u64,
+    name: String,          // v2: what the initiator would like to be called
 }
 ```
+
+`name` is a label and nothing else — not checked, not unique, and renameable by
+whoever receives it. The public key is who someone is. It rides here rather than
+in the claim so the relay never sees it, which is what keeps display names on
+the list of things the relay does not know.
+
+Version 1 blobs, which have no name, are still opened: invites live for seven
+days, and a format change must not kill links already in flight. Postcard is not
+self-describing, so the version is read first and the rest decoded to match —
+decoding a v1 blob as a v2 struct would not fail cleanly, it would read whatever
+followed the last field it recognised.
 
 The claimer refuses the invite on any `plugin_id` / `plugin_version` /
 `dictionary_hash` mismatch with its own build. Divergent validation discovered
 mid-game is unrecoverable, so it must be refused at the start.
+
+### Names in the log
+
+The invite carries the initiator's name. The claimer's travels the other way, in
+the prologue:
+
+```rust
+enum EntryBody {
+    Join   { claimer_pub_key },              // as it always was
+    JoinAs { claimer_pub_key, name },        // the same, with a name
+    ...
+}
+```
+
+A separate variant rather than a field on `Join`, for the same postcard reason:
+adding a field would change how every prologue already written is read, and
+those are in games people are still playing. A new variant leaves them exactly
+as they were, and a build with no name to give still writes the old one.
+
+Both names are inside things the relay cannot read — a sealed blob and a signed,
+encrypted log entry — so nothing about this reaches it.
 
 ### Single-use claim
 

@@ -1,18 +1,13 @@
 <script lang="ts">
-  import { goto } from '$app/navigation';
-
   import { listGames } from '$lib/db/store.ts';
   import type { GameRecord } from '$lib/db/schema.ts';
-  import { cancelPendingGame, createGame, refreshPendingGame } from '$lib/games.ts';
+  import { cancelPendingGame, refreshPendingGame } from '$lib/games.ts';
   import { groupGames, type Group } from '$lib/game-list.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
-  import { availableGames } from '$lib/registry.ts';
 
   let groups = $state<Group[]>([]);
   let loaded = $state(false);
-  let creating = $state<string | null>(null);
-  let picking = $state(false);
   let showFinished = $state(false);
   let failure = $state<string | null>(null);
 
@@ -52,20 +47,6 @@
     });
   });
 
-  async function newGame(pluginId: string) {
-    creating = pluginId;
-    failure = null;
-    try {
-      const { game } = await createGame(location.origin, pluginId);
-      await goto(`/g/${encodeURIComponent(game.gameId)}`);
-    } catch (error) {
-      failure = error instanceof Error ? error.message : String(error);
-    } finally {
-      creating = null;
-      picking = false;
-    }
-  }
-
   async function cancel(game: GameRecord) {
     if (!confirm('Call off this invite? The link will stop working for whoever has it.')) return;
     failure = null;
@@ -87,27 +68,7 @@
 {/if}
 
 <div class="stack">
-  {#if picking}
-    <div class="card picker">
-      <h2>What would you like to play?</h2>
-      {#each availableGames() as entry (entry.id)}
-        <button
-          class="choice"
-          onclick={() => newGame(entry.id)}
-          disabled={creating !== null}
-          data-game={entry.id}
-        >
-          <span class="title">{entry.title}</span>
-          <span class="muted">{creating === entry.id ? 'Creating…' : entry.blurb}</span>
-        </button>
-      {/each}
-      <button class="ghost" onclick={() => (picking = false)} disabled={creating !== null}>
-        Cancel
-      </button>
-    </div>
-  {:else}
-    <button class="primary" onclick={() => (picking = true)}>Start a new game</button>
-  {/if}
+  <a class="primary start" href="/new">Start a new game</a>
 
   {#if empty}
     <div class="card">
@@ -252,18 +213,19 @@
     margin-top: 1rem;
   }
 
-  .picker {
-    display: grid;
-    gap: 0.5rem;
-  }
-
-  .choice {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
-    text-align: left;
-    width: 100%;
+  /* A link, styled as the button it replaces: starting a game is a page now,
+     because choosing who to play is the first half of it. */
+  .start {
+    display: block;
+    padding: 0.55rem 0.95rem;
+    /* `button.primary` cannot reach an anchor, and an anchor is what this is
+       now that starting a game is a page. */
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    text-align: center;
+    text-decoration: none;
+    color: #fff;
   }
 
   .ghost {
