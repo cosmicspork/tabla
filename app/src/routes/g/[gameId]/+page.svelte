@@ -205,6 +205,18 @@
     }
   }
 
+  /**
+   * Claims the turn while a move is being built, and gives it back when it is
+   * taken apart again.
+   *
+   * Only for boards with a staging step. Tic tac toe never calls this, because
+   * there is no moment between deciding and playing to claim anything for.
+   */
+  function stage(staged: boolean) {
+    if (staged) session?.startHold();
+    else session?.releaseHold();
+  }
+
   /** Whether this game's board puts resigning in its own action row. */
   const resignInBoard = $derived(
     Boolean(game && gameEntry(game.pluginId, game.pluginVersion)?.resignInBoard),
@@ -255,13 +267,37 @@
     is refused up front.
   </p>
 {:else if board?.ready && Board}
-  <StatusBanner
-    text={statusLine}
-    detail={board.opponentPresent && !board.outcome ? 'They are here' : ''}
-    tone={board.outcome ? 'warn' : 'info'}
-  />
+  {#if board.hold}
+    <!--
+      Neutral, not accent and not danger: a turn being taken somewhere else is
+      neither progress nor a problem. The only case with a way out is the one
+      where the other device claimed the turn and then went quiet.
+    -->
+    <StatusBanner
+      text={board.hold.lapsed
+        ? `${board.hold.device} started a move and went quiet`
+        : `You're mid-move on ${board.hold.device}`}
+      tone={board.hold.lapsed ? 'warn' : 'neutral'}
+      action={board.hold.lapsed
+        ? { label: 'Play here instead', onclick: () => session?.takeOver() }
+        : undefined}
+    />
+  {:else}
+    <StatusBanner
+      text={statusLine}
+      detail={board.opponentPresent && !board.outcome ? 'They are here' : ''}
+      tone={board.outcome ? 'warn' : 'info'}
+    />
+  {/if}
 
-  <Board {board} {onplay} onresign={resign} />
+  <Board {board} {onplay} onresign={resign} onstage={stage} locked={Boolean(board.hold)} />
+
+  {#if board.rolledBack}
+    <p class="notice" data-testid="rolled-back">
+      {board.rolledBack}
+      <button class="ghost" onclick={() => session?.clearRolledBack()}>Dismiss</button>
+    </p>
+  {/if}
 
   {#if connection}
     <p class="notice">{connection}</p>

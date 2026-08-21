@@ -42,6 +42,16 @@ export interface SyncEvents {
   onPresence?: (present: boolean) => void;
   /** The relay rejected something, or offered a history we refuse. */
   onError?: (code: string, detail?: string) => void;
+  /**
+   * Another of this player's own devices claims the next move, until `until`.
+   * A null body withdraws the claim.
+   */
+  onHold?: (body: Uint8Array | null, until: number) => void;
+  /**
+   * Entries we wrote were taken back, because another of this player's devices
+   * got there first. The caller has to forget them from storage too.
+   */
+  onRolledBack?: (from: number, count: number) => void;
 }
 
 export interface SyncEngineOptions extends SyncEvents {
@@ -214,10 +224,13 @@ export class SyncEngine {
         return this.onAppended(message.data);
       case 'presence':
         return this.setPresence(message.data.others > 0);
+      case 'hold':
+        return this.events.onHold?.(
+          message.data.body === null ? null : fromBase64Url(message.data.body),
+          message.data.until,
+        );
       case 'err':
-        this.events.onError?.(message.data.code, message.data.detail);
-        this.setStatus('refused', message.data.detail);
-        return;
+        return this.onError(message.data);
     }
   }
 
@@ -318,6 +331,42 @@ export class SyncEngine {
     this.settle();
   }
 
+  /**
+   * A refusal from the relay, which is usually the end of the road and once in
+   * a while is a race with this person's own other device.
+   */
+  private onError(message: Extract<ServerMessage, { t: 'err' }>): void {
+    this.events.onError?.(message.code, message.detail);
+
+    // Our unacknowledged entries collide with something the relay already has.
+    // Whatever is stored is the history — the relay never chooses between two
+    // continuations, it keeps the first — so ours were a draft, not a move.
+    if (message.code === 'chain_mismatch' && this.tipSeq > this.relayTipSeq) {
+      return this.rollBack();
+    }
+
+    this.setStatus('refused', message.detail);
+  }
+
+  /**
+   * Takes back entries the relay never accepted.
+   *
+   * Only ever entries past its tip. Anything it has acknowledged is somebody
+   * else's history as well as ours, and a log that disagrees about those is
+   * diverged rather than ahead.
+   */
+  private rollBack(): void {
+    const from = this.relayTipSeq + 1;
+    const count = this.tipSeq - this.relayTipSeq;
+
+    this.log.truncate(from);
+    this.events.onRolledBack?.(from, count);
+
+    // And then find out what actually happened at those positions.
+    this.setStatus('syncing');
+    this.send({ t: 'req', fromSeq: from });
+  }
+
   private onAppended(message: Extract<ServerMessage, { t: 'appended' }>): void {
     this.relayTipSeq = message.tipSeq;
     this.settle();
@@ -340,5 +389,20 @@ export class SyncEngine {
    */
   unsubscribeFromPush(endpoint: string): void {
     this.send({ t: 'push_sub', subscription: null, endpoint });
+  }
+
+  /**
+   * Claims the next move for this device, for `ttlMs`.
+   *
+   * Goes to this player's own other sockets and nowhere else. Renewing is
+   * simply claiming again — the relay keeps one claim per participant.
+   */
+  hold(body: Uint8Array, ttlMs: number): void {
+    this.send({ t: 'hold', body: toBase64Url(body), ttlMs });
+  }
+
+  /** Gives the claim up, so another device can take the turn immediately. */
+  release(): void {
+    this.send({ t: 'release' });
   }
 }

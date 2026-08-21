@@ -30,6 +30,21 @@ export type BoardProps = {
    * own button instead; see `resignInBoard`.
    */
   onresign?: () => void;
+  /**
+   * Called when tiles are staged, and again when they are taken back.
+   *
+   * How a device knows a move is being *built* rather than merely looked at,
+   * which is what it claims the turn on. A board with no staging step — tic tac
+   * toe, where a tap is the whole move — never calls it and never needs to.
+   */
+  onstage?: (staged: boolean) => void;
+  /**
+   * Another of this person's devices has the turn, so this board is read-only.
+   *
+   * Not the same as it not being your turn: the position is yours to play, just
+   * not from here.
+   */
+  locked?: boolean;
 };
 
 /**
