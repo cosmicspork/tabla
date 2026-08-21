@@ -18,7 +18,8 @@ What the relay unavoidably knows, and what we accept as the threat model:
 - IP addresses at connection time (Cloudflare's, not ours, but real),
 - that an opaque mailbox id exists, is being written to, and is being polled —
   see **Inviting a contact**, which also says why that is not a new kind of
-  knowledge.
+  knowledge, and **Playing from more than one device**, which adds one such id
+  per device without making any of them distinguishable from a contact's.
 
 What it never knows: game type, board state, moves, outcomes, display names,
 or anything derived from them.
@@ -317,12 +318,16 @@ related — which tells it no more than the game room it leads to, where both
 participants' key hashes are visible anyway. It never learns a public key, a
 name, a game, or who invited whom.
 
-**Two caveats worth stating.** The same identity restored on another device
-derives the same mailboxes, which is what you want; two devices live at once
-would race to consume the same message, which is one more reason a restore is a
-move rather than a merge. And an invitation is a bearer token like any other, so
+**One caveat worth stating.** An invitation is a bearer token like any other, so
 accepting one checks that the invite's initiator key really is the contact whose
 mailbox it came from.
+
+Every device of one person derives the same pair mailboxes, so any of them may
+find an invitation from a contact — which is what you want, and used to be a
+problem: two live devices would race to consume the same message. They no longer
+do, because whichever consumes it tells the others, and a device that hears
+about a game it has already been told about writes the same row again. See
+**Playing from more than one device**.
 
 ### Single-use claim
 
@@ -449,6 +454,15 @@ has gone unanswered for 24 hours. It does not nag beyond that: the reminder's
 due time is deleted as it fires, so waking again cannot re-send it. A push is
 skipped entirely when the opponent already has a live socket — they have the
 move already.
+
+Subscriptions are stored **per endpoint**, not per participant, so a person with
+a phone and a laptop is told on both. They were per participant until devices
+existed, which meant whichever subscribed last silently replaced the other and
+the first simply stopped hearing about its turns. Rooms already in flight carry
+their old subscription into the new table the first time they are touched. A
+device that turns notifications off has its own row dropped by the next room it
+opens, rather than left to lapse on a 410; the notification tag is the game id,
+so playing a move anywhere clears the nudge everywhere.
 
 The room counts delivery attempts and records the last result, because a push
 that silently fails is otherwise invisible: the person simply never hears about
@@ -812,6 +826,131 @@ before handing it to the sandbox. It is excluded from the service worker's
 install-time precache and fetched on first use, so a visitor who never plays it
 never downloads it, and a player who has works offline afterwards.
 
+## Playing from more than one device
+
+An identity can live on several devices at once. To an opponent and to the relay
+there is still exactly one player: one public key, one fingerprint, one name.
+Nothing in the log changed to allow this, and nothing about a game reveals how
+many machines are behind it.
+
+### Why there are no per-device keys
+
+The obvious design — a root identity delegating to per-device subkeys carried in
+the log — was specified here for a long time and then not built, because reading
+what it would have to survive showed it buying nothing.
+
+Every device needs the **identity seed** regardless. `agree_game_key` derives a
+game's key from the two root keys; `draw_seed` and `deal_secret` derive from the
+seed itself. A device without it cannot open a single game it is told about. So
+the seed is copied, and once it is, a subkey is a label rather than a boundary:
+a device that has been "revoked" still holds the root and could sign itself a
+fresh delegation. The revocation would be enforceable only against a device that
+chose to respect it — which is exactly what a plain notice achieves, without the
+rest of the cost.
+
+And the cost was real. `Participants` and `expected_author` would widen; new
+`EntryBody` variants would be rejected outright by any build that predates them,
+since `replay` refuses an unknown prologue rather than ignoring it; and the relay
+would have to learn which key hashes belong to one person in order to fan out,
+count presence, and push correctly. Today it cannot link your devices at all.
+That is a property worth more than an unenforceable revocation.
+
+So devices are **private**: a 16-byte id and a name, both local, both invisible
+outside this identity's own sealed messages.
+
+### How devices tell each other things
+
+Each device has its own mailbox, derived from the seed:
+
+```
+mailboxId  = HKDF(ikm = seed, salt = "tabla-device-mailbox/v1",     info = deviceId)[0..16]
+mailboxKey = HKDF(ikm = seed, salt = "tabla-device-mailbox-msg/v1", info = mailboxId)
+body       = XChaCha20-Poly1305(mailboxKey, nonce, aad = "tabla-device/v1" || mailboxId, notice)
+```
+
+One box **per device**, not one per person. A shared box would have every device
+reading its own writes and racing the others to consume them — the same race a
+pair mailbox avoids by being per-direction. A device that learns something posts
+a copy to each of the others.
+
+A notice carries a game (in whatever state it is in), a game that has gone, a
+contact and what it is called, a device added, removed or renamed, or a change of
+display name. Moves are deliberately **not** announced: the other devices get
+those from the room and replay them into the same summary. A game *ending* is,
+because a device that never opened it could not work that out.
+
+Everything is best effort. A laptop that is switched off must not stop a phone
+starting a game, so a notice that fails to send is a device that finds out on its
+next poll, or from the game itself. Applying a name that arrived does not
+announce it onward, or two devices would inform each other of it forever.
+
+**What the relay learns.** One more opaque id per device: that it exists, is
+written to, and is polled. It cannot tell a person's second device from a second
+contact, because both look like exactly this.
+
+### Linking a device
+
+A link is a backup that travels through the relay instead of through a file. Six
+words from a 2048-word list do two jobs: joined by spaces they are the passphrase
+the bundle is sealed under, and hashed with a domain tag their first sixteen
+bytes name the place it is left.
+
+```
+linkId = SHA-256("tabla-link-id/v1" || words)[0..16]
+blob   = export(passphrase = words, bundle)
+```
+
+That the client derives the id is the point: the relay never chooses it, so it
+cannot enumerate what it holds, and it never sees the words, so it cannot open
+what it has. The blob lives ten minutes, is deleted the moment it is collected,
+and a second collection is refused. Sixty-six bits against a ten-minute window
+on a relay that can rate limit is not a number anybody is getting through, and
+six words can be read across a room, which a URL cannot.
+
+The list is BIP-39's English wordlist, vendored beside ENABLE with its own
+provenance. The curation is why: no two words share their first four letters, so
+a typo is detectable before the word is finished, and it was picked over for
+words that sound alike and words nobody would want to read aloud.
+
+A device that has more history than fits gives up the logs of its finished games
+first, then of its oldest unfinished ones, and says how many. Those games are
+still listed with their outcomes, and a log comes back from its room if the relay
+still has it.
+
+### Whose turn it is
+
+Delegation was never what stopped two of your devices answering the same move,
+and neither is anything else in the log. The relay already refuses a second
+continuation at a sequence it has filled — it keeps the first and rejects the
+rest, which it has always done. So a second device writing a move does not fork
+anything; it loses.
+
+What that leaves is a UX problem, and it is solved as one. A device that begins
+building a move takes a **hold**: relay room state with an expiry, routed only to
+sockets sharing the same participant hash, with a body sealed under the game key
+so the relay routes it blind. It is never a log entry — there is nothing here an
+opponent needs protecting from, and a new entry body would break turn parity and
+every build that predates it.
+
+Two minutes, renewed every thirty seconds while tiles are staged. The other
+devices dim the board and say where the move is being made; only a hold that
+lapses without a move arriving offers to take the turn back. Games with no
+staging step — tic tac toe, where a tap is the whole move — never take one.
+
+When both devices are offline and both move anyway, the loser's entries were
+never history. Its engine truncates them, forgets them from storage, deals the
+deck again from what is left, asks the relay what actually happened, and says so
+once. Entries the relay has **acknowledged** are never truncated: a log that
+disagrees about those is diverged, and stays diverged.
+
+### Removing a device
+
+Cooperative, and the app says so. A removed device is told through its own
+mailbox, stops, and offers to link again or start over. Nothing can take the
+seed back off a machine that holds it, so the screen says that removing asks a
+device to stop rather than making it, and that a stolen device wants a new
+identity rather than this button.
+
 ## Backup and migration
 
 A single encrypted export contains all game logs **and the identity keypair**.
@@ -820,7 +959,8 @@ omitted it would be worthless.
 
 ```
 "TABLAEXPORT1" || argon2 params || salt || nonce ||
-  XChaCha20-Poly1305( postcard{ v, identity_seed, contacts, games, exported_at, name } )
+  XChaCha20-Poly1305( postcard{ v, identity_seed, contacts, games, exported_at,
+                               name, devices } )
 ```
 
 `name` is the display name, added in version 2, and it travels because it
@@ -831,10 +971,24 @@ cached the name on their own side. What deliberately stays behind is the rest of
 the device's local preferences (theme, whether notifications were wanted), which
 belong to the phone.
 
+`devices` came with version 3, along with a much fuller record of each game:
+status, timestamps, the list summary, and — for an invitation nobody has taken
+yet — the half of the link the relay never saw and the token that withdraws it.
+Version 2 could not express an unclaimed invitation at all, so an export simply
+skipped those games. That was tolerable when restoring meant replacing a lost
+phone, and wrong once the same format had to hand an installation to a device
+standing next to one still in use.
+
+A restore therefore **adds** a device rather than migrating to one. What it
+replaces is whatever was on the device doing the restoring — a machine can only
+be one person, and there is no way to reconcile two histories of one game — but
+afterwards it is one of that identity's devices beside any others still running,
+and it says so to them.
+
 A backup is the one thing here expected to be *old*: the point of one is that it
 opens after the phone that wrote it is gone. So version 1 files, which have no
-name, are still read — the version is decoded first and the rest to match, for
-the same reason as the invite.
+name, and version 2 files, which have no devices, are still read — the version
+is decoded first and the rest to match, for the same reason as the invite.
 
 ## What is not automatically verifiable
 
@@ -873,6 +1027,16 @@ worse than one that names them:
   the manifest, and the key that checks it all ship together — so it detects a
   changed *artifact*, not a changed *app*. Whoever serves the app is trusted to
   serve the app. See **Plugin distribution**.
+- **A device that ignores being removed.** Removal is a message, not a lock:
+  every device holds the identity seed, so nothing can take it back. A removed
+  device that has been modified to disregard the notice keeps playing. The app
+  says this where it offers the button, and the honest remedy for a stolen
+  device is a new identity. See **Playing from more than one device**.
+- **Guessing a link out from under someone.** Six words are 66 bits against a
+  ten-minute window, and the blob is deleted on collection — but the relay does
+  no rate limiting today, so the margin is arithmetic rather than enforcement.
+  Nothing here would notice an attempt; a cap on failed collections per id is
+  the cheap answer if one is ever wanted.
 
 ## Phases
 
@@ -897,35 +1061,14 @@ worse than one that names them:
    Most of this was possible from phase 1 and simply had not been built. The
    contact picker in particular had been promised in this document, under
    **Identity**, since before there was a relay to promise it about.
+6. **Done:** playing from more than one device. Six words hand an installation
+   to a laptop through the relay; each device keeps the others in step through
+   a mailbox of its own; a device that starts a move claims the turn from its
+   siblings, and one that loses the race takes its move back. See **Playing
+   from more than one device**, which also records why the per-device signing
+   keys this document specified for a long time were not built.
 
 ## Roadmap
-
-**Playing from more than one device.** Today an identity lives on exactly one
-device, and a backup *moves* it rather than copying it. That is not a UI
-limitation to be lifted later — it falls out of the log. Two devices holding the
-same signing key would both be the legitimate author of the entry at a given
-sequence, and the moment both wrote one the log would fork with two validly
-signed continuations and no rule for choosing between them. The app says so
-plainly in Profile rather than leaving people to discover it.
-
-Doing it properly means the identity stops being one keypair:
-
-- A **root identity** that signs, and per-device **subkeys** it delegates to,
-  with the delegation carried in the log so an opponent can check that a device
-  speaks for the player it claims. `Participants` and `expected_author` widen
-  from "this key" to "any key this root has vouched for".
-- A rule for **who owns a turn**, because delegation alone does not prevent two
-  of your own devices answering the same move. Simplest is a lease in the log:
-  a device claims the next entry, and another may take the claim over only after
-  it has expired.
-- Key derivation follows: `agree_game_key` is between two *identities*, so it
-  has to be the root pair rather than whichever device is holding the socket.
-- And the deal has per-device secrets in it — `deriveDealSecret` is derived from
-  the identity seed, which every device of yours would share. That is fine, but
-  it wants saying out loud rather than assuming.
-
-None of this is started. It is the largest single thing left, and unlike the
-rest of this list it is protocol work rather than a product decision.
 
 **Live games, with a clock.** Presence tells you the other player is there; it
 does nothing else. A per-game choice between correspondence and live would add a

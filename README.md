@@ -72,6 +72,36 @@ exactly where the protocol needs one. So the two tiers became one. The
 [fairness tiers](ARCHITECTURE.md#fairness-tiers) section sets out the reasoning
 and what the earlier design cost.
 
+**Phase 6 is complete**: an identity can live on more than one device. Read six
+words off the phone you already play from and type them into a laptop, and the
+laptop arrives holding the same games, the same people, and the same
+fingerprint. The two keep each other in step from then on, a device that starts
+building a move says so to the others, and one can be signed out from any of
+them. Nobody you play sees more than one person, and the relay cannot tell your
+devices apart from your contacts. See
+[Playing from more than one device](ARCHITECTURE.md#playing-from-more-than-one-device),
+which also records why the per-device signing keys this project specified for a
+long time turned out to buy nothing.
+
+## Playing on more than one device
+
+Settings → Devices → **Link a new device** shows six words and a QR code, good
+for ten minutes and one device. On the other machine, open tabla and choose **I
+already play on another device**, then type the words or scan the code.
+
+The words are the key. They are never sent anywhere: the relay holds a locked
+box whose name is derived from those same words, so it can neither find what it
+is holding nor open it. Say them out loud, do not paste them into anything.
+
+Afterwards both devices play as you. Each has a name only you see, each chooses
+its own theme and notifications, and each tells the others when something
+happens. If one goes missing, remove it from any of the others — which asks it
+to stop and it does. It cannot take back what that device already downloaded, so
+a *stolen* device is a reason to start a new identity rather than to press that
+button.
+
+A backup file still exists, for the case where every device is gone.
+
 ## Letras
 
 A word game for two, played a turn at a time. The name, the board, the tile
@@ -180,6 +210,16 @@ cannot be exercised in CI. To check the rest by hand:
    from the button (the prompt has to come from a tap).
 4. Have the other player move. The notification should say only that it is your
    turn — if it ever names a move, that is a bug worth reporting loudly.
+
+Worth checking with two devices of your own, since subscriptions are stored per
+device and a bug there is invisible rather than loud:
+
+5. Link a second device and turn notifications on there too. A move by the
+   opponent should reach both.
+6. Play the move from either one. The notification should clear on both, since
+   they share a tag.
+7. Turn notifications off on one, open a game on it, and have the opponent move
+   again. Only the other device should be told.
 
 ## CI, releases, and deploys
 
