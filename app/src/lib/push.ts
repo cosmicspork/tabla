@@ -21,6 +21,8 @@ import { isIos, isStandalone } from './lifecycle.ts';
  * page needs to tell those apart.
  */
 const PUSH_PREFERENCE = 'pushEnabled';
+/** The endpoint of a subscription this device gave up, until a room is told. */
+const RETIRED_ENDPOINT = 'retiredPushEndpoint';
 
 export type PushAvailability =
   /** Ready to ask. */
@@ -124,7 +126,23 @@ export async function disablePush(): Promise<void> {
 
   const registration = await navigator.serviceWorker.getRegistration();
   const subscription = await registration?.pushManager.getSubscription();
+
+  // Remembered so that the next game this device opens can tell that room to
+  // drop the row rather than leaving it to lapse. It matters more than it did:
+  // a room now holds one row per device, so a stale one is a push going to a
+  // device whose owner turned them off, on behalf of a person who did not.
+  if (subscription) await setMeta(RETIRED_ENDPOINT, subscription.endpoint);
+
   await subscription?.unsubscribe();
+}
+
+/** The endpoint this device last turned off, if it has not been told yet. */
+export async function retiredEndpoint(): Promise<string | undefined> {
+  return getMeta<string>(RETIRED_ENDPOINT);
+}
+
+export async function clearRetiredEndpoint(): Promise<void> {
+  await setMeta(RETIRED_ENDPOINT, undefined);
 }
 
 /** Whether this device has asked for notifications, as opposed to being able to. */

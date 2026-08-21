@@ -8,7 +8,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 export const DB_NAME = 'tabla';
-export const DB_VERSION = 4;
+export const DB_VERSION = 5;
 
 /** Which side of the invite we were on. Decides who moves first. */
 export type Role = 'initiator' | 'claimer';
@@ -179,6 +179,22 @@ export interface DealRecord {
   snapshot: Uint8Array;
 }
 
+/**
+ * Another device this person plays from.
+ *
+ * Local, and private to this identity: an opponent and the relay both see one
+ * player however many devices are behind it. The name is whatever the person
+ * typed when they linked it, never inferred from a user agent.
+ */
+export interface DeviceRecord {
+  /** 16 random bytes, base64url. Chosen by the device itself when it is set up. */
+  id: string;
+  name: string;
+  linkedAt: number;
+  /** When this device last wrote a notice we read. Undefined until it does. */
+  lastSeenAt?: number;
+}
+
 interface TablaDB extends DBSchema {
   meta: {
     key: string;
@@ -210,6 +226,10 @@ interface TablaDB extends DBSchema {
   inbox: {
     key: string;
     value: InboxRecord;
+  };
+  devices: {
+    key: string;
+    value: DeviceRecord;
   };
 }
 
@@ -255,6 +275,10 @@ export function db(): Promise<TablaDatabase> {
 
       if (!database.objectStoreNames.contains('inbox')) {
         database.createObjectStore('inbox', { keyPath: 'messageId' });
+      }
+
+      if (!database.objectStoreNames.contains('devices')) {
+        database.createObjectStore('devices', { keyPath: 'id' });
       }
     },
   });

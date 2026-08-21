@@ -61,7 +61,7 @@
       const summary: ImportSummary = await importBackup(importPassphrase, bytes);
       importMessage = {
         kind: 'ok',
-        text: `Restored ${summary.games} game${summary.games === 1 ? '' : 's'} and ${summary.contacts} contact${summary.contacts === 1 ? '' : 's'}. Reload to see them.`,
+        text: `This device is now one of yours. Restored ${summary.games} game${summary.games === 1 ? '' : 's'} and ${summary.contacts} contact${summary.contacts === 1 ? '' : 's'}. Reload to see them.`,
       };
       importPassphrase = '';
       file = null;
@@ -132,8 +132,12 @@
 
 <section class="card stack">
   <div>
-    <h2>Move to a new device</h2>
-    <p class="muted">Replaces everything here with the contents of a backup.</p>
+    <h2>If you lose every device</h2>
+    <p class="muted">
+      Replaces everything here with the contents of a backup. To play from a device you still have, <a
+        href="/settings/devices">link it</a
+      > instead — that keeps both.
+    </p>
   </div>
 
   <label>
@@ -169,11 +173,12 @@
   {/if}
 
   <details class="muted small">
-    <summary>Why this is a move, not a merge</summary>
+    <summary>Why this replaces what is here</summary>
     <p>
-      Restoring takes on the identity in the backup. Two devices signing as the same player would
-      fork every shared game the moment both of them moved, and a forked game cannot be repaired —
-      so a restore replaces this device rather than joining it.
+      Restoring takes on the identity in the backup, and a device can only be one person. What is
+      already on this one is not merged with it — there is no way to reconcile two histories of the
+      same game — so it is replaced. Afterwards this device is one of that identity's, beside any
+      others still running.
     </p>
   </details>
 </section>

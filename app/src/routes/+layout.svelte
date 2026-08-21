@@ -4,7 +4,10 @@
   import { page } from '$app/state';
 
   import AppHeader from '$lib/components/AppHeader.svelte';
+  import Removed from '$lib/components/Removed.svelte';
   import Welcome from '$lib/components/Welcome.svelte';
+  import { removedBy } from '$lib/devices.ts';
+  import { removed } from '$lib/removed.svelte.ts';
   import { captureSimulationFlag } from '$lib/lifecycle.ts';
   import { hasOnboarded } from '$lib/profile.ts';
   import { applyTheme, loadTheme } from '$lib/theme.ts';
@@ -17,6 +20,15 @@
    * frame to someone who has been playing for months would be alarming.
    */
   let onboarded = $state<boolean | null>(null);
+
+  /**
+   * Which of this person's other devices removed this one, if one has.
+   *
+   * Unlike the welcome screen this does stand in front of everything: a device
+   * that has been signed out cannot usefully do anything, and letting it open a
+   * game would be letting it write a move nobody will accept.
+   */
+  const signedOutBy = $derived(removed.by);
 
   /**
    * The welcome screen interrupts the game list, not the app.
@@ -34,6 +46,7 @@
     // would put the welcome screen in front of the game it just joined.
     void page.route.id;
     void hasOnboarded().then((done) => (onboarded = done));
+    void removedBy();
   });
 
   $effect(() => {
@@ -50,7 +63,9 @@
 </script>
 
 <div class="shell">
-  {#if onboarded === false && atHome}
+  {#if signedOutBy !== undefined && page.route.id !== '/link'}
+    <Removed by={signedOutBy} />
+  {:else if onboarded === false && atHome}
     <Welcome onready={() => (onboarded = true)} />
   {:else if onboarded !== null}
     <AppHeader />

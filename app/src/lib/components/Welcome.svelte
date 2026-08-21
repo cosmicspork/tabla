@@ -17,6 +17,14 @@
 
   let name = $state('');
   let busy = $state(false);
+  /**
+   * The first screen is a fork, not a form.
+   *
+   * Asking for a name before asking whether there is anything to link is asking
+   * the wrong person: someone with a phone already playing has a name, and
+   * would be typing it a second time for a device that is about to be told it.
+   */
+  let asking = $state(false);
 
   async function start() {
     busy = true;
@@ -43,28 +51,36 @@
     </p>
   </div>
 
-  <label>
-    <span class="muted">What should friends call you?</span>
-    <input
-      bind:value={name}
-      maxlength={MAX_NAME_LENGTH}
-      autocomplete="nickname"
-      placeholder="Josh"
-      data-testid="display-name"
-      onkeydown={(event) => {
-        if (event.key === 'Enter') void start();
-      }}
-    />
-    <span class="muted hint">
-      Shown to people you play. Not a login, not unique, and you can change it later.
-    </span>
-  </label>
+  {#if !asking}
+    <button class="primary" onclick={() => (asking = true)} data-testid="new-here">
+      I'm new here
+    </button>
+    <a class="secondary" href="/link" data-testid="already-play">
+      I already play on another device
+    </a>
+    <a class="muted restore" href="/settings/backup">I have a backup file</a>
+  {:else}
+    <label>
+      <span class="muted">What should friends call you?</span>
+      <input
+        bind:value={name}
+        maxlength={MAX_NAME_LENGTH}
+        autocomplete="nickname"
+        placeholder="Josh"
+        data-testid="display-name"
+        onkeydown={(event) => {
+          if (event.key === 'Enter') void start();
+        }}
+      />
+      <span class="muted hint">
+        Shown to people you play. Not a login, not unique, and you can change it later.
+      </span>
+    </label>
 
-  <button class="primary" onclick={start} disabled={busy} data-testid="start-playing">
-    {busy ? 'Setting up…' : 'Start playing'}
-  </button>
-
-  <a class="muted restore" href="/settings/backup">I have a backup from another device</a>
+    <button class="primary" onclick={start} disabled={busy} data-testid="start-playing">
+      {busy ? 'Setting up…' : 'Start playing'}
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -102,5 +118,18 @@
 
   .restore {
     font-size: 0.85rem;
+  }
+
+  .secondary {
+    width: 100%;
+    display: block;
+    text-align: center;
+    text-decoration: none;
+    padding: 0.6rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--fg);
+    font-size: 0.95rem;
   }
 </style>

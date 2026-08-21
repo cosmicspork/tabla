@@ -13,7 +13,7 @@ import { fromBase64Url, toBase64Url } from '@tabla/shared';
 
 import { db } from './db/schema.ts';
 import type { GameRecord } from './db/schema.ts';
-import { listContacts, listGames, loadEntries } from './db/store.ts';
+import { listContacts, listDevices, listGames, loadEntries } from './db/store.ts';
 import { loadIdentity, randomBytes, replaceIdentity } from './identity.ts';
 import { displayName, markOnboarded, setDisplayName } from './profile.ts';
 
@@ -59,7 +59,7 @@ export interface BundleJson {
   exported_at: number;
   /** What this player asks to be called. Restored with the identity it names. */
   name: string;
-  /** Empty until there is somewhere to keep them; see `lib/devices.ts`. */
+  /** The other devices this identity plays from; see `lib/devices.ts`. */
   devices: { id: number[]; name: string; linked_at: number }[];
 }
 
@@ -116,7 +116,11 @@ export async function exportBackup(passphrase: string): Promise<Uint8Array> {
     })),
     games: await Promise.all((await listGames()).map(gameToJson)),
     exported_at: Date.now(),
-    devices: [],
+    devices: (await listDevices()).map((device) => ({
+      id: [...fromBase64Url(device.id)],
+      name: device.name,
+      linked_at: device.linkedAt,
+    })),
   };
 
   return core.exportBundle(passphrase, JSON.stringify(bundle), randomBytes(16), randomBytes(24));
@@ -137,15 +141,37 @@ export interface ImportSummary {
  */
 export async function importBackup(passphrase: string, file: Uint8Array): Promise<ImportSummary> {
   const { core } = await loadIdentity();
-  const bundle = JSON.parse(core.importBundle(passphrase, file)) as BundleJson;
+  const summary = await applyBundle(JSON.parse(core.importBundle(passphrase, file)) as BundleJson);
 
+  // Imported here rather than at the top, because devices needs this module to
+  // read a game and the pair would otherwise import each other.
+  const { announce, thisDevice } = await import('./devices.ts');
+  const me = await thisDevice();
+  await announce({
+    DeviceAdded: { id: [...fromBase64Url(me.id)], name: me.name, linked_at: me.linkedAt },
+  });
+
+  return summary;
+}
+
+/**
+ * Writes a decrypted bundle into this profile and adopts its identity.
+ *
+ * Shared by restoring a backup and taking a device link, which differ only in
+ * how the bundle arrived. Either way this device ends up as one of that
+ * identity's devices rather than as its only one — which is the change from
+ * when a restore was a migration and there was nothing else left to contradict.
+ */
+export async function applyBundle(bundle: BundleJson): Promise<ImportSummary> {
+  const { core } = await loadIdentity();
   const seed = new Uint8Array(bundle.identity_seed);
   const database = await db();
 
-  const tx = database.transaction(['games', 'entries', 'contacts'], 'readwrite');
+  const tx = database.transaction(['games', 'entries', 'contacts', 'devices'], 'readwrite');
   const gamesStore = tx.objectStore('games');
   const entriesStore = tx.objectStore('entries');
   const contactsStore = tx.objectStore('contacts');
+  const devicesStore = tx.objectStore('devices');
 
   const now = Date.now();
   const restoredIdentity = new core.Identity(seed);
@@ -169,6 +195,14 @@ export async function importBackup(passphrase: string, file: Uint8Array): Promis
       name: contact.name,
       firstSeen: contact.first_seen,
       lastPlayed: contact.first_seen,
+    });
+  }
+
+  for (const device of bundle.devices) {
+    await devicesStore.put({
+      id: toBase64Url(new Uint8Array(device.id)),
+      name: device.name,
+      linkedAt: device.linked_at,
     });
   }
 

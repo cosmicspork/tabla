@@ -9,7 +9,8 @@
    */
   import HubRow from '$lib/components/HubRow.svelte';
   import { GLYPHS } from '$lib/components/SettingsGlyphs.ts';
-  import { getMeta, listContacts } from '$lib/db/store.ts';
+  import { getMeta, listContacts, listDevices } from '$lib/db/store.ts';
+  import { thisDevice } from '$lib/devices.ts';
   import { displayName } from '$lib/profile.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
@@ -21,6 +22,8 @@
   let key = $state('');
   let name = $state('');
   let contacts = $state<string[]>([]);
+  let devices = $state<{ id: string; name: string }[]>([]);
+  let myDevice = $state('');
   let availability = $state<PushAvailability | null>(null);
   let theme = $state<ThemeChoice>('system');
   let lastBackup = $state<number | undefined>(undefined);
@@ -35,6 +38,8 @@
       key = await myPublicKey();
       name = await displayName();
       contacts = (await listContacts()).map((contact) => contact.name);
+      myDevice = (await thisDevice()).id;
+      devices = await listDevices();
       availability = await pushAvailability();
       theme = await loadTheme();
       lastBackup = await getMeta<number>('lastBackupAt');
@@ -58,7 +63,16 @@
     return sizes.reduce((total, size) => total + size, 0);
   }
 
-  const profileSummary = $derived(key ? `${fingerprint(key)}… · this device only` : 'This device');
+  const profileSummary = $derived(
+    key ? `${name || 'No name yet'} · ${fingerprint(key)}…` : 'Your name and fingerprint',
+  );
+
+  const devicesSummary = $derived.by(() => {
+    const others = devices.filter((device) => device.id !== myDevice);
+    if (others.length === 0) return 'Just this one';
+    if (others.length === 1) return `This one and ${others[0].name}`;
+    return `This one and ${others.length} others`;
+  });
 
   const peopleSummary = $derived(
     contacts.length === 0
@@ -69,7 +83,7 @@
   const notificationsSummary = $derived.by(() => {
     switch (availability) {
       case 'enabled':
-        return 'On · a nudge when it is your turn';
+        return 'On, for this device';
       case 'available':
         return 'Off';
       case 'needs-install':
@@ -106,6 +120,12 @@
     title="Profile"
     summary={profileSummary}
     glyph={GLYPHS.profile}
+  />
+  <HubRow
+    href="/settings/devices"
+    title="Devices"
+    summary={devicesSummary}
+    glyph={GLYPHS.devices}
   />
   <HubRow href="/settings/people" title="People" summary={peopleSummary} glyph={GLYPHS.people} />
   <HubRow

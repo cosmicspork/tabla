@@ -11,6 +11,7 @@ import {
 
 import { deleteGame, getGame, putGame, rememberContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
+import { announceContact, announceGame, announceGameGone } from './devices.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { displayName, markOnboarded, PLACEHOLDER_NAME } from './profile.ts';
 import { requestPersistentStorage } from './lifecycle.ts';
@@ -104,6 +105,9 @@ export async function createGame(
   };
 
   await putGame(game);
+  // Told rather than left to be discovered: a game started on a phone should
+  // be on the laptop before anyone has moved.
+  await announceGame(game);
 
   // Now that there is something worth keeping, ask the browser not to evict it.
   // Losing this database loses the games and the identity key with them.
@@ -230,6 +234,8 @@ export async function joinGame(
   // could have known it. A name already saved for this key wins — a local
   // rename is a decision, and a later handshake is not an argument against it.
   await rememberContact(game.initiatorPubKey, invite.name || PLACEHOLDER_NAME, now);
+  await announceGame(game);
+  await announceContact(game.initiatorPubKey, invite.name || PLACEHOLDER_NAME, now);
   await requestPersistentStorage();
 
   return { ok: true, game };
@@ -281,7 +287,7 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
 
   // The blob key is dropped once the invite is spent: the link is no longer
   // usable, so keeping the key would be storing a secret for no reason.
-  return updateGame(gameId, {
+  const claimed = await updateGame(gameId, {
     claimerPubKey: status.claimerPubKey,
     status: 'active',
     blobKey: undefined,
@@ -289,6 +295,15 @@ export async function refreshPendingGame(gameId: string): Promise<GameRecord | u
     lastActivity: now,
     opponentName: asIntended ? game.opponentName : undefined,
   });
+
+  // Whichever device happened to be polling learned this; the others cannot,
+  // because the invite is spent and its status is now a 404 to them.
+  if (claimed) {
+    await announceGame(claimed);
+    await announceContact(status.claimerPubKey, PLACEHOLDER_NAME, now);
+  }
+
+  return claimed;
 }
 
 /**
@@ -330,6 +345,7 @@ export async function cancelPendingGame(gameId: string): Promise<void> {
   }
 
   await deleteGame(gameId);
+  await announceGameGone(gameId);
 }
 
 function fromHex(hex: string): Uint8Array {

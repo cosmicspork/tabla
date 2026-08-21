@@ -1,10 +1,14 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { page } from '$app/state';
 
+  import StatusBanner from '$lib/components/StatusBanner.svelte';
+  import { catchUp } from '$lib/catch-up.ts';
   import { listContacts, listGames } from '$lib/db/store.ts';
   import type { GameRecord, InboxRecord } from '$lib/db/schema.ts';
   import { cancelPendingGame, refreshPendingGame } from '$lib/games.ts';
   import { groupGames, type Group } from '$lib/game-list.ts';
+  import { pollDevices } from '$lib/devices.ts';
   import { acceptInvite, declineInvite, inbox, pollInbox } from '$lib/mailbox.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
@@ -17,6 +21,8 @@
   let loaded = $state(false);
   let showFinished = $state(false);
   let failure = $state<string | null>(null);
+  /** Non-null only while a freshly linked device is fetching its logs. */
+  let catching = $state<{ done: number; total: number } | null>(null);
 
   // Home is the one screen with no page title: the header shows the wordmark.
   $effect(() => {
@@ -45,6 +51,29 @@
     invitations = await inbox();
     await pollInbox().catch(() => []);
     invitations = await inbox();
+
+    // Anything this person's other devices have done since we last looked: a
+    // game started on a phone, an invitation withdrawn, a contact renamed.
+    if ((await pollDevices().catch(() => 0)) > 0) {
+      groups = await groupGames(await listGames());
+      names = Object.fromEntries(
+        (await listContacts()).map((contact) => [contact.publicKey, contact.name]),
+      );
+    }
+  }
+
+  /**
+   * Fills in a device that has just been linked.
+   *
+   * The list appears immediately with whatever the bundle carried, and the
+   * logs arrive underneath it one game at a time — the alternative is a
+   * spinner in front of a device that has everything except the moves.
+   */
+  async function fillIn() {
+    catching = { done: 0, total: 0 };
+    await catchUp((progress) => (catching = progress));
+    catching = null;
+    await refresh();
   }
 
   async function accept(item: InboxRecord) {
@@ -84,6 +113,14 @@
     });
   });
 
+  // A device that has just been linked arrives with every game listed and most
+  // of the logs missing. `?linked=1` is how `/link` says so.
+  $effect(() => {
+    if (page.url.searchParams.get('linked') === null) return;
+    void goto('/', { replaceState: true, noScroll: true, keepFocus: true });
+    void fillIn();
+  });
+
   async function cancel(game: GameRecord) {
     if (!confirm('Call off this invite? The link will stop working for whoever has it.')) return;
     failure = null;
@@ -105,6 +142,14 @@
 {/if}
 
 <div class="stack">
+  {#if catching}
+    <StatusBanner
+      text="Catching up"
+      detail={catching.total > 0 ? `${catching.done} of ${catching.total} games` : ''}
+      spinner
+    />
+  {/if}
+
   <a class="primary start" href="/new">Start a new game</a>
 
   {#if invitations.length > 0}

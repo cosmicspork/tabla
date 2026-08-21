@@ -12,7 +12,7 @@
   import { GameSession, type BoardState } from '$lib/game-session.ts';
   import { cancelPendingGame, refreshPendingGame } from '$lib/games.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
-  import { currentSubscription } from '$lib/push.ts';
+  import { clearRetiredEndpoint, currentSubscription, retiredEndpoint } from '$lib/push.ts';
   import { installPlugin, installedState, InstallError } from '$lib/plugin/install.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
   import { gameEntry, titleOf, type BoardProps } from '$lib/registry.ts';
@@ -121,7 +121,16 @@
       // If this device already has a subscription, re-register it: room state
       // is per game, and a game created later would not otherwise know about it.
       const existing = await currentSubscription();
-      if (existing) opened.subscribeToPush(existing);
+      if (existing) {
+        opened.subscribeToPush(existing);
+      } else {
+        // And if it gave one up, this is the first room since that can be told.
+        const retired = await retiredEndpoint();
+        if (retired) {
+          opened.unsubscribeFromPush(retired);
+          await clearRetiredEndpoint();
+        }
+      }
     } catch (error) {
       failure = describe(error);
     }

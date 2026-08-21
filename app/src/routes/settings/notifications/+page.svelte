@@ -65,7 +65,8 @@
       <h2>When it is your turn</h2>
       <p class="muted">
         A notification says only that your opponent has played — never what. The relay could not
-        include more if it tried: it has never been able to read a move.
+        include more if it tried: it has never been able to read a move. Each device chooses for
+        itself, and playing a move anywhere clears the nudge everywhere.
       </p>
     </div>
 
