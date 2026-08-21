@@ -102,6 +102,35 @@ button.
 
 A backup file still exists, for the case where every device is gone.
 
+## Links, and the browser they open in
+
+An invite link and a device link both work exactly once, so where they are
+opened matters more than it looks.
+
+On Android and the desktop the installed app asks for its own links — the
+system decides whether to grant that, and the window you already had open is
+the one that gets them. A tab and the installed app share their data there
+anyway, so at worst you get the wrong window.
+
+On iPhone and iPad neither is true. A link — tapped, or scanned from a QR
+code — always opens the browser, and the app on your Home Screen keeps entirely
+separate data from Safari. Redeeming a link in the wrong one would use it up,
+start you off as somebody new, and leave the game where the app cannot see it.
+
+So on iOS, a link opened in a browser tab asks first — *do you already play
+tabla here?* — before it takes anything:
+
+- **New to tabla:** carry on where you are. Nothing is different, and it is one
+  tap.
+- **Already playing:** copy the link, open tabla from your Home Screen, and tap
+  **Open a link someone sent me** on the game list. Paste it there. A device
+  link is six words, so you can just read them across.
+
+Nothing is spent until you choose, so the link is still good either way. And
+pasting works for the same reason the relay cannot read your invites: the part
+after the `#` is the key, it never went to a server, and it does not need one to
+come back.
+
 ## Letras
 
 A word game for two, played a turn at a time. The name, the board, the tile
@@ -196,7 +225,7 @@ What the suites cover:
 | `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift. Includes the deal: the shuffle argument against provers who duplicate, drop, or invent a tile, and the rules and the deal wired together the way the app wires them, including a player who attaches a valid proof about one tile while claiming another |
 | `worker` vitest | the relay's storage, single-use claims, retention and tombstones, and a full two-client game over real WebSockets inside workerd, including eviction and re-upload |
 | `app` vitest | that the TypeScript boundary produces the same bytes as the Rust vectors, that the relay's framing helpers agree with the core, that the committed manifest is signed by the pinned key and describes the artifacts actually committed, and that a download whose hash is wrong is refused and never stored |
-| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, and a word game played to a challenge — including a real deal over real proofs, restoring one mid-game and finding the rack intact, downloading the game once and no more, removing it and getting it back, and each player being told when the other arrives and leaves |
+| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, an invite refusing to be spent in the browser it landed in and being carried into the app by hand, and a word game played to a challenge — including a real deal over real proofs, restoring one mid-game and finding the rack intact, downloading the game once and no more, removing it and getting it back, and each player being told when the other arrives and leaves |
 
 ## Verifying push on a real device
 
@@ -220,6 +249,17 @@ device and a bug there is invisible rather than loud:
    they share a tag.
 7. Turn notifications off on one, open a game on it, and have the opponent move
    again. Only the other device should be told.
+
+Links are worth the same treatment, and for the same reason — a simulated
+iPhone is still Chromium, which shares storage between a tab and an installed
+app where a real one does not:
+
+8. With tabla on the Home Screen, send yourself an invite link and tap it. It
+   opens Safari, which should ask whether you already play here rather than
+   join. Say you do, copy the link, and paste it into **Open a link someone sent
+   me** in the app. The game should open there, and only there.
+9. Answer the other way on a device with no tabla installed. It should join in
+   the tab, as it always has.
 
 ## CI, releases, and deploys
 

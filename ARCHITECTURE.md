@@ -368,6 +368,58 @@ A claimed invite is refused with a 409 rather than deleted. By then it is a game
 with two players in it, and deleting the blob would not un-start it — resigning
 is what ends a game.
 
+### Which browser the link opened in
+
+A link is opened by the operating system, not by us, and on iOS it is never
+opened by the installed app. A Home Screen web app there has its own storage
+container: same origin, same code, and none of the other one's data. A tapped
+URL or a scanned QR code opens Safari — or an in-app browser, which is a third
+container again — and nothing in a manifest changes that.
+
+That would be cosmetic if links were repeatable. They are not. Claiming is what
+spends an invite, and claiming is also what generates the identity that spends
+it: `loadIdentity` makes a key on first call. So a link redeemed in the wrong
+container burns the one-use token, mints a stranger's identity, and puts the
+game somewhere the app on the Home Screen cannot reach — and looks exactly like
+success while doing it. The person finds out days later, when the game is not
+there and the link is gone.
+
+Two halves, because no one thing fixes it:
+
+- **Where the platform can route the link, it is asked to.** The manifest
+  declares `handle_links: preferred`, which offers in-scope links to the
+  installed app, and `launch_handler.client_mode: navigate-existing`, which
+  sends them to the window already open rather than a second one. Chromium acts
+  on both, subject to the switch the system keeps for it — Android calls it
+  "open supported links" — so this is a request and not a guarantee. It is
+  enough there, because on Android and the desktop a tab and the installed app
+  share one storage container anyway: what is at stake is which window appears,
+  never whose games are in it.
+- **Where it cannot, nothing irreversible happens until we know.** On iOS in a
+  tab, `/j` and `/link` stop before claiming. `identityExists` answers "has
+  anyone played in this container?" without the asking being the answer — the
+  ordinary `loadIdentity` would generate one and make it true. If the answer is
+  no, the person is asked, once, in the only terms that can be checked from
+  inside the wrong container: do you already play tabla here? Someone genuinely
+  new says no and joins where they landed, which is how most people meet tabla
+  and costs them one tap. Someone who already plays is sent to the app with the
+  link intact.
+
+What this deliberately does not catch is an in-app browser on Android. The
+WebView inside a chat app has its own storage too, but it is told apart from the
+real browser only by user-agent guesswork, and a list of chat apps to sniff for
+is a list that goes stale. Someone who lands in one joins as a new person, as
+they always have; `/open` is the way back, and it is on the game list rather
+than behind a link precisely so it can be reached without one.
+
+The hand-off is manual because it has to be: an installed web app on iOS cannot
+be sent a URL. `/open` is the other end of it — paste the link, or the six
+words, and it is dispatched. That works for the same reason the relay cannot
+read an invite: the secret is in the fragment, which never went to a server and
+needs no server to come back. `parseSharedLink` takes whatever survived the
+trip — a whole URL, a bare fragment, six words read aloud — because the cost of
+not recognising a single-use link is another trip to the person who sent it.
+
 ## Sync
 
 Game rooms are addressed `GAME_ROOMS.idFromName(gameId)`, so the same game always
@@ -478,7 +530,9 @@ iOS constraints shape the UX rather than being worked around:
 - push works only when the PWA is installed to the home screen,
 - the permission prompt must come from a user gesture,
 - cached assets may be evicted after roughly a week of inactivity,
-- Background Sync is unavailable, so sync runs on app open and on push.
+- Background Sync is unavailable, so sync runs on app open and on push,
+- an installed app and Safari keep separate storage, and links always open
+  Safari — see "Which browser the link opened in".
 
 The app detects standalone mode, shows an install walkthrough to Safari users,
 and asks for notification permission only from a button, only after the first

@@ -11,7 +11,7 @@
  */
 import { devices, expect, test, type Browser, type Page } from '@playwright/test';
 
-import { introduce, startGame } from './helpers.ts';
+import { introduce, inviteLink, startGame } from './helpers.ts';
 
 /**
  * iPhone characteristics only. The full device descriptor carries
@@ -124,4 +124,100 @@ test('the app still opens with no network at all', async ({ browser }) => {
 
   await context.setOffline(false);
   await context.close();
+});
+
+/**
+ * Where a link opened, and what it cost to find out.
+ *
+ * On iOS a link never reaches the installed app: a tapped URL or a scanned code
+ * opens Safari, and Safari cannot see what the Home Screen app keeps. Redeeming
+ * one there is not a wrong window but a lost invite — it works exactly once, and
+ * spending it also generates the identity that spends it. So the browser tab
+ * asks before it takes anything, and the two contexts below stand in for the two
+ * storage containers, which is what they are.
+ */
+test('an invite opened in an iOS browser tab is not spent there', async ({ browser }) => {
+  const host = await browser.newContext();
+  const a = await host.newPage();
+  await a.goto('/');
+  await startGame(a);
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  const link = await inviteLink(a);
+
+  // Safari, where the link landed.
+  const safari = await browser.newContext(iPhone);
+  const b = await safari.newPage();
+  await b.goto(link);
+
+  await expect(b.getByTestId('join-already-play')).toBeVisible();
+  await b.getByTestId('join-already-play').click();
+  // The whole link, on screen and ready to be carried across.
+  await expect(b.getByTestId('handoff-carry')).toContainText('#');
+
+  // Nothing was taken: no identity was generated here, so this is still a
+  // browser that has never seen tabla.
+  await b.goto('/');
+  await expect(b.getByTestId('new-here')).toBeVisible();
+
+  // And the invite is still there for the app it was meant for. A separate
+  // context, because separate storage is exactly what makes this a problem.
+  const installed = await browser.newContext(iPhone);
+  const c = await installed.newPage();
+  await c.goto('/?simulate=ios-standalone');
+  // The flag is recorded once the app has started, so wait for it to have
+  // started before navigating away from the URL carrying it.
+  await expect(c.getByTestId('new-here')).toBeVisible();
+  await c.goto(link);
+
+  await expect(c.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 20_000 });
+  await expect(a.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 20_000 });
+
+  await host.close();
+  await safari.close();
+  await installed.close();
+});
+
+test('someone genuinely new can still join from the tab they landed in', async ({ browser }) => {
+  const host = await browser.newContext();
+  const a = await host.newPage();
+  await a.goto('/');
+  await startGame(a);
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  const link = await inviteLink(a);
+
+  const safari = await browser.newContext(iPhone);
+  const b = await safari.newPage();
+  await b.goto(link);
+
+  // The question costs one tap, and answering it the other way costs nothing
+  // else: this is how most people meet tabla.
+  await b.getByTestId('join-new-here').click();
+  await expect(b.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 20_000 });
+
+  await host.close();
+  await safari.close();
+});
+
+test('a link that opened in the wrong browser can be carried in by hand', async ({ browser }) => {
+  const host = await browser.newContext();
+  const a = await host.newPage();
+  await a.goto('/');
+  await startGame(a);
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  const link = await inviteLink(a);
+
+  const installed = await browser.newContext(iPhone);
+  const b = await installed.newPage();
+  await b.goto('/?simulate=ios-standalone');
+  await introduce(b, 'Ada');
+
+  await b.getByRole('link', { name: 'Open a link someone sent me' }).click();
+  await b.getByTestId('paste-link').fill(link);
+  await b.getByTestId('do-open').click();
+
+  await expect(b.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 20_000 });
+  await expect(a.getByRole('heading', { name: 'Tic tac toe' })).toBeVisible({ timeout: 20_000 });
+
+  await host.close();
+  await installed.close();
 });

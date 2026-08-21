@@ -43,6 +43,19 @@ export async function loadIdentity(): Promise<{
   return cached;
 }
 
+/**
+ * Whether this storage already holds an identity, without making one.
+ *
+ * `loadIdentity` generates on first call, which is what nearly every caller
+ * wants and exactly what a link must not do. "Is this the browser you play in?"
+ * has to be answerable without the asking being the answer — on iOS the app on
+ * the Home Screen and the same app in Safari are separate storage, and minting
+ * a key in the wrong one is how a person ends up a stranger to their own games.
+ */
+export async function identityExists(): Promise<boolean> {
+  return (await getMeta<Uint8Array>(IDENTITY_SEED_KEY))?.length === 32;
+}
+
 export async function myPublicKey(): Promise<string> {
   const { identity } = await loadIdentity();
   return toBase64Url(identity.publicKey());

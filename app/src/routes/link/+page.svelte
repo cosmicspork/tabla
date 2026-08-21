@@ -5,12 +5,22 @@
    * Typing is the primary way in, not scanning: this is most often a laptop,
    * where a camera is awkward or absent and the words are being read aloud from
    * a phone across the room. The scanner is offered when the browser has one.
+   *
+   * Where the browser is not where this person will end up playing, the form is
+   * held back first. Taking a link adopts a whole installation into whatever
+   * storage this page happens to be in, and spends the link doing it — so on
+   * iOS, where a scanned code opens Safari and the Home Screen app cannot see
+   * what Safari keeps, linking here would hand the games to a tab and leave the
+   * installed app empty with nothing left to link.
    */
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
 
   import Mark from '$lib/components/Mark.svelte';
+  import OpenInApp from '$lib/components/OpenInApp.svelte';
   import StatusBanner from '$lib/components/StatusBanner.svelte';
+  import { opensOutsideTheApp } from '$lib/handoff.ts';
+  import { identityExists } from '$lib/identity.ts';
   import { LinkError, LINK_WORD_COUNT, takeLink, unknownWords } from '$lib/link.ts';
   import { MAX_NAME_LENGTH } from '$lib/profile.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
@@ -22,8 +32,26 @@
   let failure = $state('');
   let scanning = $state(false);
 
+  /**
+   * Whether to send this person to the installed app before anything is spent.
+   *
+   * `null` while we are finding out, which is a third state worth having: the
+   * form is what must not be shown too early, and showing it for a frame is
+   * showing it.
+   *
+   * A browser that already holds an identity is somebody's real installation,
+   * whatever the platform does with links, and is left alone.
+   */
+  let elsewhere = $state<boolean | null>(null);
+
   $effect(() => {
     pageTitle.text = 'Link this device';
+  });
+
+  $effect(() => {
+    void (async () => {
+      elsewhere = opensOutsideTheApp() && !(await identityExists());
+    })();
   });
 
   // The words may arrive in the fragment, from a scan on another app or a tap
@@ -97,54 +125,58 @@
     </p>
   </div>
 
-  {#if failure}
-    <StatusBanner text={failure} tone="warn" />
+  {#if elsewhere}
+    <OpenInApp kind="device" {words} oncontinue={() => (elsewhere = false)} />
+  {:else if elsewhere === false}
+    {#if failure}
+      <StatusBanner text={failure} tone="warn" />
+    {/if}
+
+    <section class="card stack">
+      <label>
+        <span class="muted">The words from your other device</span>
+        <input
+          bind:value={words}
+          autocapitalize="none"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="harbor linen quartz meadow copper sable"
+          data-testid="link-words-input"
+        />
+      </label>
+
+      {#if missing.length > 0}
+        <p class="muted small" data-testid="unknown-words">
+          Not on the list: {missing.join(', ')}
+        </p>
+      {/if}
+
+      {#if scanningAvailable()}
+        <div>
+          <button onclick={scan} disabled={scanning}>
+            {scanning ? 'Looking…' : 'Scan the code instead'}
+          </button>
+        </div>
+      {/if}
+    </section>
+
+    <section class="card stack">
+      <label>
+        <span class="muted">What should we call this device?</span>
+        <input
+          bind:value={name}
+          maxlength={MAX_NAME_LENGTH}
+          placeholder="Laptop"
+          data-testid="device-name"
+        />
+      </label>
+      <p class="muted small">Only you see this. It tells your devices apart in Settings.</p>
+    </section>
+
+    <button class="primary" onclick={link} disabled={!ready || busy} data-testid="do-link">
+      {busy ? 'Linking…' : 'Link this device'}
+    </button>
   {/if}
-
-  <section class="card stack">
-    <label>
-      <span class="muted">The words from your other device</span>
-      <input
-        bind:value={words}
-        autocapitalize="none"
-        autocomplete="off"
-        spellcheck="false"
-        placeholder="harbor linen quartz meadow copper sable"
-        data-testid="link-words-input"
-      />
-    </label>
-
-    {#if missing.length > 0}
-      <p class="muted small" data-testid="unknown-words">
-        Not on the list: {missing.join(', ')}
-      </p>
-    {/if}
-
-    {#if scanningAvailable()}
-      <div>
-        <button onclick={scan} disabled={scanning}>
-          {scanning ? 'Looking…' : 'Scan the code instead'}
-        </button>
-      </div>
-    {/if}
-  </section>
-
-  <section class="card stack">
-    <label>
-      <span class="muted">What should we call this device?</span>
-      <input
-        bind:value={name}
-        maxlength={MAX_NAME_LENGTH}
-        placeholder="Laptop"
-        data-testid="device-name"
-      />
-    </label>
-    <p class="muted small">Only you see this. It tells your devices apart in Settings.</p>
-  </section>
-
-  <button class="primary" onclick={link} disabled={!ready || busy} data-testid="do-link">
-    {busy ? 'Linking…' : 'Link this device'}
-  </button>
 
   <a class="muted back" href="/">Never mind</a>
 </div>
