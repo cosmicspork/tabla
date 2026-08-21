@@ -85,6 +85,20 @@ export function parseSharedLink(input: string): SharedLink | null {
   return null;
 }
 
+/**
+ * The six words a device link carries, for the field that wants them.
+ *
+ * A scan and a paste and a typed line all end here, which is the point: the
+ * camera decodes, and this decides. Returns null for anything that is not a
+ * device link — a stray code the camera happened to catch is not an error, it
+ * is a frame to keep scanning past.
+ */
+export function linkWordsFrom(input: string): string | null {
+  const link = parseSharedLink(input);
+  if (link?.kind !== 'device') return null;
+  return link.to.split('#')[1].replace(/-/g, ' ');
+}
+
 /** Only a real web URL counts; anything else is treated as a bare fragment. */
 function asUrl(text: string): URL | null {
   try {
