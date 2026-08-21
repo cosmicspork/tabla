@@ -9,7 +9,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { PROTOCOL_VERSION, toBase64Url } from '@tabla/shared';
+import { PROTOCOL_VERSION, entryHash, toBase64Url } from '@tabla/shared';
 import type { ClientMessage, ServerMessage } from '@tabla/shared';
 
 import { loadCoreFromDisk } from '../wasm/node.ts';
@@ -56,7 +56,7 @@ class FakeSocket implements SocketLike {
 const nonce = (n: number) => new Uint8Array(24).fill(n);
 
 /** A game with its prologue written, plus the pieces to write more. */
-async function game() {
+async function game(totalEntries = 2) {
   const alice = new core.Identity(ALICE);
   const bob = new core.Identity(BOB);
   const key = alice.agreeGameKey(bob.publicKey(), BLOB_ID, GAME_ID);
@@ -66,6 +66,10 @@ async function game() {
 
   log.appendSigned(bob, session.sealJoin(nonce(0), bob.publicKey(), 'Pooja'));
   log.appendSigned(alice, session.sealSetup(nonce(1), new Uint8Array()));
+  for (let seq = 2; seq < totalEntries; seq += 1) {
+    const author = seq % 2 === 0 ? alice : bob;
+    log.appendSigned(author, session.sealMove(seq, nonce(seq), new Uint8Array([seq & 0xff])));
+  }
 
   const socket = new FakeSocket();
   const events: { holds: (string | null)[]; rolled: { from: number; count: number }[] } = {
@@ -201,5 +205,33 @@ describe('saying hello', () => {
     const hello = socket.of('hello')[0];
 
     expect(hello).toMatchObject({ v: PROTOCOL_VERSION, tipSeq: Number(log.tipSeq) });
+  });
+});
+
+describe('uploading a long local history', () => {
+  it('sends schema-sized batches until the relay has every entry', async () => {
+    const { engine, log, socket } = await game(600);
+    const expectedSizes = [256, 256, 88];
+
+    expect(() => engine.flush()).not.toThrow();
+
+    for (const [index, size] of expectedSizes.entries()) {
+      const batch = socket.of('append')[index];
+      expect(batch.entries).toHaveLength(size);
+
+      const last = batch.entries.at(-1)!;
+      const stored = log.entry(last.seq);
+      expect(stored).toBeDefined();
+      socket.deliver({
+        t: 'appended',
+        tipSeq: last.seq,
+        tipHash: toBase64Url(await entryHash(stored!)),
+      });
+    }
+
+    const sent = socket.of('append').flatMap((batch) => batch.entries);
+    expect(sent.map((entry) => entry.seq)).toEqual(Array.from({ length: 600 }, (_, seq) => seq));
+    expect(engine.pendingCount).toBe(0);
+    expect(engine.status).toBe('synced');
   });
 });

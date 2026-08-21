@@ -14,13 +14,36 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { toBase64Url } from '@tabla/shared';
 
-import { exportBackup, gameFromJson, gameToJson, importBackup } from './backup.ts';
+import {
+  applyBundle,
+  exportBackup,
+  gameFromJson,
+  gameToJson,
+  importBackup,
+  LAST_BACKUP_AT_KEY,
+} from './backup.ts';
 import type { BundleJson } from './backup.ts';
 import { closeDatabase, resetDatabaseHandle } from './db/schema.ts';
 import type { GameRecord } from './db/schema.ts';
-import { appendEntries, putGame, rememberContact } from './db/store.ts';
-import { forgetIdentity, loadIdentity } from './identity.ts';
-import { setDisplayName } from './profile.ts';
+import {
+  appendEntries,
+  getDealSnapshot,
+  getMeta,
+  listContacts,
+  listDevices,
+  listGames,
+  listInbox,
+  loadEntries,
+  putDealSnapshot,
+  putGame,
+  putInboxItem,
+  rememberContact,
+  setMeta,
+} from './db/store.ts';
+import { thisDevice } from './devices.ts';
+import { forgetIdentity, loadIdentity, myPublicKey } from './identity.ts';
+import { displayName, setDisplayName } from './profile.ts';
+import { REMOVED_BY, removed } from './removed.svelte.ts';
 import { loadCoreFromDisk } from './wasm/node.ts';
 
 // `loadCore` memoises, so priming it from disk is enough for everything below:
@@ -79,6 +102,7 @@ afterEach(async () => {
   resetDatabaseHandle();
   indexedDB.deleteDatabase('tabla');
   forgetIdentity();
+  removed.by = undefined;
 });
 
 describe('the backup bundle', () => {
@@ -100,6 +124,100 @@ describe('the backup bundle', () => {
 
     expect(summary.games).toBe(2);
     expect(summary.contacts).toBe(1);
+  });
+
+  it('replaces identity-bound data instead of merging it with this device', async () => {
+    const imported = await gameToJson(finishedGame());
+    imported.entries = [[9]];
+    const importedContact = b64(20);
+    const importedDevice = b64(21, 16);
+    const bundle: BundleJson = {
+      v: 3,
+      identity_seed: [...new Uint8Array(32).fill(42)],
+      name: '',
+      contacts: [
+        {
+          public_key: [...new Uint8Array(32).fill(20)],
+          name: 'New contact',
+          first_seen: 200,
+        },
+      ],
+      games: [imported],
+      exported_at: 300,
+      devices: [{ id: [...new Uint8Array(16).fill(21)], name: 'New phone', linked_at: 250 }],
+    };
+
+    await putGame(pendingGame());
+    await putGame(finishedGame());
+    await appendEntries(
+      finishedGame().gameId,
+      [
+        { seq: 0, entry: new Uint8Array([1]) },
+        { seq: 1, entry: new Uint8Array([2]) },
+      ],
+      Date.now(),
+    );
+    await rememberContact(b64(22), 'Old contact', 100);
+    const currentDevice = await thisDevice('Old phone');
+    await putDealSnapshot({
+      gameId: pendingGame().gameId,
+      tipSeq: 0,
+      tipHash: b64(24),
+      snapshot: new Uint8Array([3]),
+    });
+    await putInboxItem({
+      messageId: b64(25, 16),
+      mailboxId: b64(26, 16),
+      fromPubKey: b64(27),
+      blobId: b64(28, 16),
+      blobKey: b64(29),
+      pluginId: 'tictactoe',
+      pluginVersion: 1,
+      createdAt: 100,
+      receivedAt: 100,
+    });
+    await setDisplayName('Old identity');
+    await setMeta(REMOVED_BY, b64(30, 16));
+    await setMeta(LAST_BACKUP_AT_KEY, 100);
+    removed.by = b64(30, 16);
+
+    const summary = await applyBundle(bundle);
+
+    expect((await listGames()).map((game) => game.gameId)).toEqual([finishedGame().gameId]);
+    expect(await loadEntries(finishedGame().gameId)).toEqual([new Uint8Array([9])]);
+    expect((await listContacts()).map((contact) => contact.publicKey)).toEqual([importedContact]);
+    expect((await listDevices()).map((device) => device.id)).toEqual([importedDevice]);
+    expect(await getDealSnapshot(pendingGame().gameId)).toBeUndefined();
+    expect(await listInbox()).toEqual([]);
+    expect(await displayName()).toBe('');
+    expect(await getMeta(REMOVED_BY)).toBeUndefined();
+    expect(await getMeta(LAST_BACKUP_AT_KEY)).toBeUndefined();
+    expect(removed.by).toBeUndefined();
+    expect(await myPublicKey()).toBe(summary.publicKey);
+    expect(await thisDevice()).toMatchObject({ id: currentDevice.id, name: currentDevice.name });
+  });
+
+  it('keeps the previous profile when a replacement bundle is invalid', async () => {
+    await loadIdentity();
+    const previousKey = await myPublicKey();
+    await setDisplayName('Old identity');
+    await putGame(pendingGame());
+
+    const invalid: BundleJson = {
+      v: 3,
+      identity_seed: [],
+      name: 'Replacement',
+      contacts: [],
+      games: [],
+      exported_at: 300,
+      devices: [],
+    };
+
+    await expect(applyBundle(invalid)).rejects.toThrow();
+
+    expect((await listGames()).map((game) => game.gameId)).toEqual([pendingGame().gameId]);
+    expect(await displayName()).toBe('Old identity');
+    expect(await myPublicKey()).toBe(previousKey);
   });
 
   it('carries an invitation nobody has claimed', async () => {

@@ -11,6 +11,7 @@
  * is the queue, which removes a whole class of bugs where the two disagree.
  */
 import {
+  MAX_APPEND_ENTRIES,
   PROTOCOL_VERSION,
   clientMessageSchema,
   fromBase64Url,
@@ -190,10 +191,14 @@ export class SyncEngine {
     if (!this.socket) return;
 
     const from = this.relayTipSeq + 1;
-    const entries = [...this.log.suffix(from)].map((entry, i) => ({
-      seq: from + i,
-      entry: toBase64Url(entry),
-    }));
+    const through = Math.min(this.tipSeq, from + MAX_APPEND_ENTRIES - 1);
+    const entries = [];
+
+    for (let seq = from; seq <= through; seq += 1) {
+      const entry = this.log.entry(seq);
+      if (!entry) throw new Error(`local log has no entry ${seq}`);
+      entries.push({ seq, entry: toBase64Url(entry) });
+    }
 
     if (entries.length > 0) this.send({ t: 'append', entries });
   }
@@ -368,7 +373,8 @@ export class SyncEngine {
   }
 
   private onAppended(message: Extract<ServerMessage, { t: 'appended' }>): void {
-    this.relayTipSeq = message.tipSeq;
+    this.relayTipSeq = Math.max(this.relayTipSeq, message.tipSeq);
+    this.flush();
     this.settle();
   }
 

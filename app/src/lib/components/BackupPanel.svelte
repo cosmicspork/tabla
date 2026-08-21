@@ -4,6 +4,7 @@
     downloadBackup,
     exportBackup,
     importBackup,
+    LAST_BACKUP_AT_KEY,
     type ImportSummary,
   } from '$lib/backup.ts';
   import { setMeta } from '$lib/db/store.ts';
@@ -38,7 +39,7 @@
       // Only the date, and only so settings can say how long ago it was. A
       // person who cannot remember whether they have ever made one is the
       // person most likely to need one.
-      await setMeta('lastBackupAt', Date.now());
+      await setMeta(LAST_BACKUP_AT_KEY, Date.now());
       exportMessage = {
         kind: 'ok',
         text: 'Backup saved. Keep it somewhere you would keep a password.',

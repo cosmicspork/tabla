@@ -36,12 +36,10 @@ import type { DeviceRecord, GameRecord } from './db/schema.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { deleteMailboxMessage, pollMailboxes, postMailbox } from './relay.ts';
 import { cleanName, setDisplayName } from './profile.ts';
-import { removed } from './removed.svelte.ts';
+import { REMOVED_BY, removed } from './removed.svelte.ts';
 
 const DEVICE_ID = 'deviceId';
 const DEVICE_NAME = 'deviceName';
-/** Set when another device says this one was removed. Read by the shell. */
-export const REMOVED_BY = 'removedBy';
 
 /** What a device is called before anyone gives it a better idea. */
 export const DEFAULT_DEVICE_NAME = 'This device';
@@ -72,7 +70,10 @@ const idBytes = (base64url: string) => fromBase64Url(base64url);
  * key, and two devices colliding on 16 random bytes is not a scenario.
  */
 export async function thisDevice(name?: string): Promise<DeviceRecord> {
-  const existingId = await getMeta<string>(DEVICE_ID);
+  const [existingId, existingName] = await Promise.all([
+    getMeta<string>(DEVICE_ID),
+    getMeta<string>(DEVICE_NAME),
+  ]);
 
   if (existingId) {
     const known = await getDevice(existingId);
@@ -80,7 +81,9 @@ export async function thisDevice(name?: string): Promise<DeviceRecord> {
 
     const updated: DeviceRecord = {
       id: existingId,
-      name: cleanName(name ?? known?.name ?? DEFAULT_DEVICE_NAME) || DEFAULT_DEVICE_NAME,
+      name:
+        cleanName(name ?? known?.name ?? existingName ?? DEFAULT_DEVICE_NAME) ||
+        DEFAULT_DEVICE_NAME,
       linkedAt: known?.linkedAt ?? Date.now(),
     };
     await putDevice(updated);

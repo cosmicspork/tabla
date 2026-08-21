@@ -58,6 +58,13 @@ impl Default for KdfParams {
     }
 }
 
+// These fields are outside the authenticated ciphertext. Bound them before
+// Argon2 sees them so an arbitrary file cannot choose the browser's memory or
+// CPU bill. The ceilings leave ample room to strengthen today's defaults.
+const MAX_IMPORT_M_COST: u32 = 64 * 1024;
+const MAX_IMPORT_T_COST: u32 = 10;
+const MAX_IMPORT_P_COST: u8 = 4;
+
 /// A contact: someone we have completed a handshake with at least once.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contact {
@@ -332,15 +339,19 @@ pub fn import(passphrase: &[u8], bytes: &[u8]) -> Result<ExportBundle, CryptoErr
     salt.copy_from_slice(&bytes[off..off + EXPORT_SALT_LEN]);
     off += EXPORT_SALT_LEN;
 
-    let key = derive_key(
-        passphrase,
-        &salt,
-        KdfParams {
-            m_cost,
-            t_cost,
-            p_cost,
-        },
-    )?;
+    let params = KdfParams {
+        m_cost,
+        t_cost,
+        p_cost,
+    };
+    if params.m_cost > MAX_IMPORT_M_COST
+        || params.t_cost > MAX_IMPORT_T_COST
+        || params.p_cost > MAX_IMPORT_P_COST
+    {
+        return Err(CryptoError::BadKdfParams);
+    }
+
+    let key = derive_key(passphrase, &salt, params)?;
     let plaintext = crate::seal::open(&key, EXPORT_AAD, &bytes[off..])?;
 
     // The version is read first and the rest decoded to match, because postcard
@@ -538,6 +549,34 @@ mod tests {
         .unwrap();
 
         assert_eq!(import(b"pw", &file).unwrap(), bundle);
+    }
+
+    #[test]
+    fn an_untrusted_file_cannot_choose_an_unbounded_kdf_cost() {
+        let mut file = file_containing(&[]);
+        let t_cost = EXPORT_MAGIC.len() + 4;
+        file[t_cost..t_cost + 4].copy_from_slice(&11u32.to_le_bytes());
+
+        assert_eq!(import(b"pw", &file), Err(CryptoError::BadKdfParams));
+    }
+
+    #[test]
+    fn an_untrusted_file_cannot_choose_an_unbounded_kdf_memory() {
+        let mut file = file_containing(&[]);
+        let m_cost = EXPORT_MAGIC.len();
+        file[m_cost..m_cost + 4].copy_from_slice(&(65 * 1024u32).to_le_bytes());
+
+        assert_eq!(import(b"pw", &file), Err(CryptoError::BadKdfParams));
+    }
+
+    #[test]
+    fn an_untrusted_file_cannot_choose_unbounded_kdf_parallelism() {
+        let mut file = file_containing(&[]);
+        let m_cost = EXPORT_MAGIC.len();
+        file[m_cost..m_cost + 4].copy_from_slice(&64u32.to_le_bytes());
+        file[EXPORT_MAGIC.len() + 8] = 5;
+
+        assert_eq!(import(b"pw", &file), Err(CryptoError::BadKdfParams));
     }
 
     #[test]

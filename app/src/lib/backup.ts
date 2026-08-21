@@ -14,10 +14,12 @@ import { fromBase64Url, toBase64Url } from '@tabla/shared';
 import { db } from './db/schema.ts';
 import type { GameRecord } from './db/schema.ts';
 import { listContacts, listDevices, listGames, loadEntries } from './db/store.ts';
-import { loadIdentity, randomBytes, replaceIdentity } from './identity.ts';
-import { displayName, markOnboarded, setDisplayName } from './profile.ts';
+import { forgetIdentity, IDENTITY_SEED_KEY, loadIdentity, randomBytes } from './identity.ts';
+import { cleanName, displayName, DISPLAY_NAME_KEY, ONBOARDED_KEY } from './profile.ts';
+import { REMOVED_BY, removed } from './removed.svelte.ts';
 
 export const BACKUP_EXTENSION = '.tabla';
+export const LAST_BACKUP_AT_KEY = 'lastBackupAt';
 
 /**
  * The bundle format this build writes. Mirrors `EXPORT_VERSION` in
@@ -167,61 +169,79 @@ export async function importBackup(passphrase: string, file: Uint8Array): Promis
 export async function applyBundle(bundle: BundleJson): Promise<ImportSummary> {
   const { core } = await loadIdentity();
   const seed = new Uint8Array(bundle.identity_seed);
-  const database = await db();
-
-  const tx = database.transaction(['games', 'entries', 'contacts', 'devices'], 'readwrite');
-  const gamesStore = tx.objectStore('games');
-  const entriesStore = tx.objectStore('entries');
-  const contactsStore = tx.objectStore('contacts');
-  const devicesStore = tx.objectStore('devices');
-
   const now = Date.now();
   const restoredIdentity = new core.Identity(seed);
   const mine = toBase64Url(restoredIdentity.publicKey());
+  const name = cleanName(bundle.name);
 
-  for (const game of bundle.games) {
+  // Prepare every record before opening the transaction. A malformed bundle
+  // must fail before anything in the existing profile is cleared.
+  const restoredGames = bundle.games.map((game) => {
     const gameId = toBase64Url(new Uint8Array(game.game_id));
     const initiator = toBase64Url(new Uint8Array(game.initiator_pub_key));
+    return {
+      record: gameFromJson(game, gameId, initiator === mine, now),
+      entries: game.entries.map((entry, seq) => ({
+        gameId,
+        seq,
+        entry: new Uint8Array(entry),
+      })),
+    };
+  });
+  const restoredContacts = bundle.contacts.map((contact) => ({
+    publicKey: toBase64Url(new Uint8Array(contact.public_key)),
+    name: contact.name,
+    firstSeen: contact.first_seen,
+    lastPlayed: contact.first_seen,
+  }));
+  const restoredDevices = bundle.devices.map((device) => ({
+    id: toBase64Url(new Uint8Array(device.id)),
+    name: device.name,
+    linkedAt: device.linked_at,
+  }));
 
-    await gamesStore.put(gameFromJson(game, gameId, initiator === mine, now));
+  const database = await db();
+  const tx = database.transaction(
+    ['meta', 'games', 'entries', 'contacts', 'deals', 'inbox', 'devices'],
+    'readwrite',
+  );
+  const metaStore = tx.objectStore('meta');
+  const gamesStore = tx.objectStore('games');
+  const entriesStore = tx.objectStore('entries');
+  const contactsStore = tx.objectStore('contacts');
+  const dealsStore = tx.objectStore('deals');
+  const inboxStore = tx.objectStore('inbox');
+  const devicesStore = tx.objectStore('devices');
 
-    for (const [seq, entry] of game.entries.entries()) {
-      await entriesStore.put({ gameId, seq, entry: new Uint8Array(entry) });
-    }
+  // A bundle is one identity's complete local state, not an update to whichever
+  // identity happened to be on this device before it. Clear and restore in one
+  // transaction so a failed import leaves the previous profile intact.
+  await Promise.all([
+    gamesStore.clear(),
+    entriesStore.clear(),
+    contactsStore.clear(),
+    dealsStore.clear(),
+    inboxStore.clear(),
+    devicesStore.clear(),
+  ]);
+  await Promise.all([
+    metaStore.put(seed, IDENTITY_SEED_KEY),
+    name ? metaStore.put(name, DISPLAY_NAME_KEY) : metaStore.delete(DISPLAY_NAME_KEY),
+    metaStore.put(true, ONBOARDED_KEY),
+    metaStore.delete(REMOVED_BY),
+    metaStore.delete(LAST_BACKUP_AT_KEY),
+  ]);
+
+  for (const game of restoredGames) {
+    await gamesStore.put(game.record);
+    for (const entry of game.entries) await entriesStore.put(entry);
   }
-
-  for (const contact of bundle.contacts) {
-    const publicKey = toBase64Url(new Uint8Array(contact.public_key));
-    await contactsStore.put({
-      publicKey,
-      name: contact.name,
-      firstSeen: contact.first_seen,
-      lastPlayed: contact.first_seen,
-    });
-  }
-
-  for (const device of bundle.devices) {
-    await devicesStore.put({
-      id: toBase64Url(new Uint8Array(device.id)),
-      name: device.name,
-      linkedAt: device.linked_at,
-    });
-  }
+  for (const contact of restoredContacts) await contactsStore.put(contact);
+  for (const device of restoredDevices) await devicesStore.put(device);
 
   await tx.done;
-  await replaceIdentity(seed);
-
-  // The name belongs to the identity, not to the phone it was on: a device that
-  // restored everything except what it is called would go on introducing itself
-  // to new opponents as nobody, and nothing would ever say so — the people it
-  // had already played cached the name on their side. Empty from a backup taken
-  // before names existed, which leaves the field to be filled in rather than
-  // overwriting something with nothing.
-  if (bundle.name) await setDisplayName(bundle.name);
-
-  // A device that has just been handed an identity and a history has plainly
-  // been introduced; asking it who it is would be absurd.
-  await markOnboarded();
+  forgetIdentity();
+  removed.by = undefined;
 
   return {
     games: bundle.games.length,

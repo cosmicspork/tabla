@@ -6,4 +6,7 @@
  * navigation — writing moves nobody will accept — so the poll sets this too and
  * the shell reacts at once.
  */
+/** Identity-scoped flag persisted alongside the reactive state. */
+export const REMOVED_BY = 'removedBy';
+
 export const removed = $state<{ by: string | undefined }>({ by: undefined });

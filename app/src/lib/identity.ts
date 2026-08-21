@@ -9,7 +9,7 @@ import { toBase64Url } from '@tabla/shared';
 import { getMeta, setMeta } from './db/store.ts';
 import { loadCore, type CoreModule, type Identity } from './wasm/core.ts';
 
-const SEED_KEY = 'identitySeed';
+export const IDENTITY_SEED_KEY = 'identitySeed';
 
 let cached: { core: CoreModule; identity: Identity } | null = null;
 
@@ -33,20 +33,14 @@ export async function loadIdentity(): Promise<{
 
   const core = await loadCore();
 
-  let seed = await getMeta<Uint8Array>(SEED_KEY);
+  let seed = await getMeta<Uint8Array>(IDENTITY_SEED_KEY);
   if (!seed || seed.length !== 32) {
     seed = randomBytes(32);
-    await setMeta(SEED_KEY, seed);
+    await setMeta(IDENTITY_SEED_KEY, seed);
   }
 
   cached = { core, identity: new core.Identity(seed) };
   return cached;
-}
-
-/** Replaces the identity, as an import from a backup does. */
-export async function replaceIdentity(seed: Uint8Array): Promise<void> {
-  await setMeta(SEED_KEY, seed);
-  cached = null;
 }
 
 export async function myPublicKey(): Promise<string> {
@@ -62,7 +56,7 @@ export function fingerprint(publicKeyBase64Url: string): string {
   return (publicKeyBase64Url.match(/.{1,4}/g) ?? []).slice(0, 4).join(' ');
 }
 
-/** Test seam. */
+/** Drops a cached identity after its stored seed changes. */
 export function forgetIdentity(): void {
   cached = null;
 }

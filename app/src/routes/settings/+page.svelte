@@ -7,6 +7,7 @@
    * rare and the merely informative. Each summary is read from the thing it
    * describes, so the hub answers most questions without being opened.
    */
+  import { LAST_BACKUP_AT_KEY } from '$lib/backup.ts';
   import HubRow from '$lib/components/HubRow.svelte';
   import { GLYPHS } from '$lib/components/SettingsGlyphs.ts';
   import { getMeta, listContacts, listDevices } from '$lib/db/store.ts';
@@ -42,7 +43,7 @@
       devices = await listDevices();
       availability = await pushAvailability();
       theme = await loadTheme();
-      lastBackup = await getMeta<number>('lastBackupAt');
+      lastBackup = await getMeta<number>(LAST_BACKUP_AT_KEY);
       stored = await storedBytes();
     })();
   });
