@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/cosmicspork/tabla/compare/v0.3.0...v0.4.0) (2026-08-21)
+
+
+### Features
+
+* **app:** claim the turn, and take back a move that lost the race ([#23](https://github.com/cosmicspork/tabla/issues/23)) ([dfa43dc](https://github.com/cosmicspork/tabla/commit/dfa43dc43548e083de73700ea7a8e7a8df0efdfe))
+* **app:** link a second device and keep both in step ([#22](https://github.com/cosmicspork/tabla/issues/22)) ([357a537](https://github.com/cosmicspork/tabla/commit/357a5376c3660595f0ae8b464e963a4f0ff58586))
+* **core:** devices, their mailboxes, and a hold on the turn ([#20](https://github.com/cosmicspork/tabla/issues/20)) ([a3d0ce9](https://github.com/cosmicspork/tabla/commit/a3d0ce943cdc61c538c8df33ee9cfd2ba60e7c5f))
+* **relay:** device links, turn holds, and push per device ([#21](https://github.com/cosmicspork/tabla/issues/21)) ([820a0e8](https://github.com/cosmicspork/tabla/commit/820a0e82a91f62aeba39db9dfb791f6e5b796086))
+
+
+### Bug Fixes
+
+* **backup:** carry the display name across a device move ([#17](https://github.com/cosmicspork/tabla/issues/17)) ([b2c06ff](https://github.com/cosmicspork/tabla/commit/b2c06ff04339c67b3b7e6bc28b1f2016fb33351c))
+* harden restore and sync edge cases ([#25](https://github.com/cosmicspork/tabla/issues/25)) ([debeb91](https://github.com/cosmicspork/tabla/commit/debeb91d9b4c409a9df12f2fbfa0d8fff1cd91c7))
+
 ## [0.3.0](https://github.com/cosmicspork/tabla/compare/v0.2.0...v0.3.0) (2026-08-20)
 
 
