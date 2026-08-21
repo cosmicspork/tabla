@@ -152,6 +152,14 @@
 
   <a class="primary start" href="/new">Start a new game</a>
 
+  <!--
+    The way back in for a link that opened somewhere else. On iPhone and iPad
+    every link does: the installed app cannot be handed a URL, so someone who
+    was sent an invite arrives here with it still on their clipboard and no
+    other door to put it through.
+  -->
+  <a class="muted paste" href="/open">Open a link someone sent me</a>
+
   {#if invitations.length > 0}
     <section>
       <h2 class="group">
@@ -340,6 +348,12 @@
     text-align: center;
     text-decoration: none;
     color: #fff;
+  }
+
+  .paste {
+    justify-self: center;
+    margin-top: -0.25rem;
+    font-size: 0.85rem;
   }
 
   .ghost {
