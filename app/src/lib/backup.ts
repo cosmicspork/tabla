@@ -1,5 +1,5 @@
 /**
- * Backup and device migration.
+ * Backup, and the format a device link travels in.
  *
  * The export carries every game log **and the identity keypair**. That is not a
  * convenience: without the private key the logs cannot be verified or decrypted,
@@ -135,9 +135,11 @@ export interface ImportSummary {
 /**
  * Restores a backup into this profile.
  *
- * **This replaces the identity.** Two devices sharing one identity would both
- * be able to sign as the same player, and their logs would fork the moment both
- * moved — so an import is a migration, not a merge, and it overwrites.
+ * **This replaces whatever was here.** A device can only be one person, and two
+ * histories of the same game cannot be reconciled — so an import overwrites
+ * rather than merges. What it does not do any more is *move* the identity: this
+ * device becomes one of that identity's, beside any others still running, and
+ * tells them so. To play from a device you still have, link it instead.
  */
 export async function importBackup(passphrase: string, file: Uint8Array): Promise<ImportSummary> {
   const { core } = await loadIdentity();
