@@ -9,7 +9,7 @@
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-import { introduce, inviteLink, startGame } from './helpers.ts';
+import { introduce, inviteLink, onTurn, startGame } from './helpers.ts';
 
 /** Sets up a played game between two people, and returns the initiator's page. */
 async function playedGame(browser: Browser) {
@@ -174,6 +174,64 @@ test('a game started on one device appears on the other', async ({ browser }) =>
 
   await a.goto('/');
   await expect(a.getByText(/Letras/)).toBeVisible({ timeout: 30_000 });
+
+  await one.close();
+  await two.close();
+  await three.close();
+});
+
+test('a move being built on one device locks the board on the other', async ({ browser }) => {
+  const { one, two, a, b } = await playedGame(browser);
+  const words = await offer(a);
+
+  const three = await browser.newContext();
+  const c = await three.newPage();
+  await take(c, words, 'Laptop');
+
+  // A word game, because it is the one with a staging step: tic tac toe has no
+  // moment between deciding and playing for a device to claim anything in.
+  await a.goto('/');
+  await startGame(a, 'letras');
+  await expect(a.getByTestId('status')).toContainText('Waiting for someone');
+  const link = await inviteLink(a);
+  await b.goto(link);
+
+  await expect(a.locator('[data-rack]')).toHaveAttribute('data-rack', /^.{7}$/, {
+    timeout: 30_000,
+  });
+
+  // The deal writes entries of its own, so who moves first is not fixed. If it
+  // is the opponent, they pass — the turn is what this test is about, not the
+  // word.
+  const [mover] = await onTurn(a, b);
+  if (mover !== a) {
+    await b.getByRole('button', { name: 'Pass' }).click();
+    await expect(a.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
+  }
+
+  // Open the same game on the laptop, which is the same player.
+  await c.goto('/');
+  const row = c.getByRole('link', { name: /Letras/ });
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await row.click();
+  await expect(c.locator('[data-rack]')).toHaveAttribute('data-rack', /^.{7}$/, {
+    timeout: 30_000,
+  });
+
+  // Start building a word on the phone.
+  await a.locator('.rack .tile').first().click();
+  await a.locator('[data-cell="112"]').click();
+
+  // The laptop says where the move is being made, and does not offer to take it
+  // over: nothing is wrong, and interrupting yourself from another room is not
+  // a thing worth having a button for.
+  await expect(c.getByTestId('status')).toContainText(/mid-move on/, { timeout: 30_000 });
+  await expect(c.getByRole('button', { name: 'Play here instead' })).toBeHidden();
+  await expect(c.locator('.word-board.waiting')).toBeVisible();
+
+  // Taking the tiles back gives the turn up again.
+  await a.getByRole('button', { name: 'Recall' }).click();
+  await expect(c.getByTestId('status')).not.toContainText(/mid-move on/, { timeout: 30_000 });
 
   await one.close();
   await two.close();

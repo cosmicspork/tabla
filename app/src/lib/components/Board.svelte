@@ -7,9 +7,13 @@
   let {
     board,
     onplay,
+    locked = false,
   }: {
     board: BoardState;
     onplay: (move: unknown) => void;
+    /** Another of this person's devices is mid-move. There is no staging step
+     *  here — a tap is the whole move — so this only ever greys the grid. */
+    locked?: boolean;
   } = $props();
 
   const marks = ['✕', '○'];
@@ -20,12 +24,12 @@
   const yourTurn = $derived(Boolean(board.view.yourTurn) && !board.outcome);
 </script>
 
-<div class="board" class:done={Boolean(board.outcome)}>
+<div class="board" class:done={Boolean(board.outcome) || locked}>
   {#each cells as mark, cell (cell)}
     <button
       class="cell"
       class:won={winning.has(cell)}
-      disabled={!yourTurn || !legal.has(cell)}
+      disabled={!yourTurn || locked || !legal.has(cell)}
       aria-label={mark === null ? `Play cell ${cell + 1}` : `Cell ${cell + 1}, ${marks[mark]}`}
       onclick={() => onplay({ cell })}
     >

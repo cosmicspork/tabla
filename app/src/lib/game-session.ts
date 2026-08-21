@@ -8,9 +8,17 @@
 import { fromBase64Url, toBase64Url } from '@tabla/shared';
 
 import { Deal, type DealDuty } from './deal.ts';
-import { appendEntries, getContact, loadEntries, renameContact, updateGame } from './db/store.ts';
+import {
+  appendEntries,
+  deleteEntriesFrom,
+  getContact,
+  loadEntries,
+  renameContact,
+  updateGame,
+} from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
-import { announceContact, announceGame } from './devices.ts';
+import { announceContact, announceGame, deviceName, thisDevice } from './devices.ts';
+
 import { loadIdentity, randomBytes } from './identity.ts';
 import { dictionaryBytes } from './dict.ts';
 import { pluginBytes } from './plugin/install.ts';
@@ -21,6 +29,16 @@ import { openGameSocket } from './relay.ts';
 import { displayName, PLACEHOLDER_NAME } from './profile.ts';
 import { SyncEngine, type SyncStatus } from './sync/engine.ts';
 import type { CoreModule, Identity, Log, Session } from './wasm/core.ts';
+
+/**
+ * How long a device claims the turn for, and how often it renews.
+ *
+ * Long enough that nobody sees the lapsed state unless they genuinely walked
+ * away from a half-built word; renewed often enough that a device still open
+ * never reaches it at all.
+ */
+const HOLD_TTL_MS = 2 * 60 * 1000;
+const HOLD_RENEW_MS = 30 * 1000;
 
 export interface BoardState {
   /**
@@ -56,6 +74,16 @@ export interface BoardState {
    * "You lost" is telling you less than it knows.
    */
   resignedBy?: number;
+  /**
+   * Another of this person's own devices is part-way through this move.
+   *
+   * `lapsed` means the claim ran out without a move arriving — the usual reason
+   * being that the device went in a pocket — and is the only case where this
+   * one offers to take the turn back.
+   */
+  hold?: { device: string; until: number; lapsed: boolean };
+  /** Set once when this device's own entries were taken back. */
+  rolledBack?: string;
 }
 
 export class GameSession {
@@ -70,6 +98,10 @@ export class GameSession {
   readonly listeners = new Set<(state: BoardState) => void>();
 
   private syncStatus: SyncStatus = 'idle';
+  /** The claim on this turn, if one of this person's other devices has it. */
+  private heldBy: { device: string; until: number } | null = null;
+  private holdTimer: ReturnType<typeof setInterval> | undefined;
+  private rolledBackNote: string | undefined;
   private lastError: string | null = null;
 
   private constructor(private game: GameRecord) {}
@@ -133,18 +165,31 @@ export class GameSession {
       this.log.append(entry);
     }
 
+    await this.openDeal();
+  }
+
+  /**
+   * Builds the deal for this game, if it has one.
+   *
+   * Also the way back after a rollback: a saved snapshot is only accepted
+   * against the tip it was taken at, so one from a log that has since got
+   * shorter is discarded and the deck is rebuilt from what is left.
+   */
+  private async openDeal(): Promise<void> {
     const entry = gameEntry(this.game.pluginId, this.game.pluginVersion);
-    if (entry?.seed === 'deal') {
-      this.deal = await Deal.open({
-        core,
-        identity,
-        gameId: this.game.gameId,
-        player: this.player,
-        deck: await pluginHost().deck(this.game.pluginId, this.game.pluginVersion),
-        hashAt: (seq) => this.hashAt(seq),
-      });
-      await this.syncDeal();
-    }
+    if (entry?.seed !== 'deal') return;
+
+    this.deal = await Deal.open({
+      core: this.core,
+      identity: this.identity,
+      gameId: this.game.gameId,
+      player: this.player,
+      deck: await pluginHost().deck(this.game.pluginId, this.game.pluginVersion),
+      hashAt: (seq) => this.hashAt(seq),
+    });
+
+    this.dealSyncedTo = -1;
+    await this.syncDeal();
   }
 
   /** The log's tip hash at a sequence, for checking a saved deal against it. */
@@ -245,14 +290,106 @@ export class GameSession {
         this.lastError = detail ?? code;
         void this.notify();
       },
+      onHold: (body, until) => void this.onHold(body, until),
+      onRolledBack: (from, count) => void this.onRolledBack(from, count),
     });
 
     await this.engine.connect();
   }
 
   disconnect(): void {
+    this.releaseHold();
     this.engine?.disconnect();
     this.engine = null;
+    this.heldBy = null;
+  }
+
+  /**
+   * Records, or clears, another device's claim on this turn.
+   *
+   * The token is sealed under the game key, so an opponent could open one and
+   * learn only that a device id it has never seen is thinking. A token that
+   * will not open is ignored: something is wrong with it, and refusing to draw
+   * a board over it would be the worse failure.
+   */
+  private async onHold(body: Uint8Array | null, until: number): Promise<void> {
+    if (body === null) {
+      this.heldBy = null;
+      return void this.notify();
+    }
+
+    try {
+      const device = toBase64Url(this.session.openHold(body));
+      this.heldBy = { device: await deviceName(device), until };
+    } catch {
+      this.heldBy = null;
+    }
+
+    await this.notify();
+  }
+
+  /**
+   * Forgets entries the relay never accepted.
+   *
+   * The engine has already taken them out of the log; this takes them out of
+   * storage, so a reload does not put them back.
+   */
+  private async onRolledBack(from: number, count: number): Promise<void> {
+    await deleteEntriesFrom(this.game.gameId, from);
+
+    // Everything decoded from the entries that just went is now about moves
+    // this game never had.
+    for (const seq of [...this.payloads.keys()]) {
+      if (seq >= from) this.payloads.delete(seq);
+    }
+    // And the deck has to be dealt again from what is left: a snapshot is only
+    // valid against the tip it was taken at, so `open` will refuse the old one.
+    await this.openDeal();
+
+    const who = this.heldBy?.device ?? 'Your other device';
+    this.rolledBackNote =
+      count === 1
+        ? `${who} played this turn first. Your tiles went back to the rack.`
+        : `${who} played first. Your last ${count} moves went back.`;
+
+    await this.persistAndNotify();
+  }
+
+  /**
+   * Claims this turn for this device, and keeps claiming while it is being
+   * thought about.
+   *
+   * Two minutes is long enough that nobody sees the lapsed state unless they
+   * genuinely walked away, and renewal every thirty seconds means a device that
+   * is still open never reaches it at all.
+   */
+  startHold(): void {
+    if (!this.engine) return;
+
+    this.claim();
+    clearInterval(this.holdTimer);
+    this.holdTimer = setInterval(() => this.claim(), HOLD_RENEW_MS);
+  }
+
+  /** Gives the turn back, so another device can take it without waiting. */
+  releaseHold(): void {
+    clearInterval(this.holdTimer);
+    this.holdTimer = undefined;
+    this.engine?.release();
+  }
+
+  /** Takes a turn back from a device that claimed it and went quiet. */
+  takeOver(): void {
+    this.heldBy = null;
+    this.startHold();
+    void this.notify();
+  }
+
+  private claim(): void {
+    void (async () => {
+      const me = await thisDevice();
+      this.engine?.hold(this.session.sealHold(randomBytes(24), fromBase64Url(me.id)), HOLD_TTL_MS);
+    })();
   }
 
   /** Called when the app regains focus or a push arrives. */
@@ -434,7 +571,14 @@ export class GameSession {
   /** The log position the last automatic move was made at. */
   private lastAutoAt = -1;
 
+  /** The note is shown once and then forgotten, not kept as a state. */
+  clearRolledBack(): void {
+    this.rolledBackNote = undefined;
+    void this.notify();
+  }
+
   async resign(): Promise<void> {
+    this.releaseHold();
     const seq = Number(this.log.tipSeq) + 1;
     this.appendEntry(this.session.sealResign(seq, randomBytes(24)));
     await this.persistAndNotify();
@@ -462,6 +606,8 @@ export class GameSession {
       pending: this.engine?.pendingCount ?? 0,
       status: this.syncStatus,
       opponentPresent: this.engine?.opponentPresent ?? false,
+      hold: this.heldBy ? { ...this.heldBy, lapsed: Date.now() >= this.heldBy.until } : undefined,
+      rolledBack: this.rolledBackNote,
     };
 
     // Sequence 0 is the claimer's join and sequence 1 the initiator's setup.
@@ -515,6 +661,8 @@ export class GameSession {
       pending: this.engine?.pendingCount ?? 0,
       status: this.syncStatus,
       opponentPresent: this.engine?.opponentPresent ?? false,
+      hold: this.heldBy ? { ...this.heldBy, lapsed: Date.now() >= this.heldBy.until } : undefined,
+      rolledBack: this.rolledBackNote,
     };
   }
 

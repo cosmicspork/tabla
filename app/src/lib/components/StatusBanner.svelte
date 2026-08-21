@@ -12,18 +12,35 @@
     detail = '',
     tone = 'info',
     spinner = false,
+    action = undefined,
   }: {
     text: string;
     detail?: string;
-    tone?: 'info' | 'warn';
+    /**
+     * `neutral` for a state that is not about this device doing anything —
+     * a turn being played somewhere else is not progress and not a problem,
+     * and the accent colour would claim it is one or the other.
+     */
+    tone?: 'info' | 'warn' | 'neutral';
     spinner?: boolean;
+    /** An inline way out, for a banner that is asking rather than reporting. */
+    action?: { label: string; onclick: () => void };
   } = $props();
 </script>
 
-<p class="banner" class:warn={tone === 'warn'} aria-live="polite" data-testid="status">
+<p
+  class="banner"
+  class:warn={tone === 'warn'}
+  class:neutral={tone === 'neutral'}
+  aria-live="polite"
+  data-testid="status"
+>
   {#if spinner}<span class="spinner" aria-hidden="true"></span>{/if}
   <span class="text">{text}</span>
   {#if detail}<span class="detail">{detail}</span>{/if}
+  {#if action}
+    <button class="action" onclick={action.onclick}>{action.label}</button>
+  {/if}
 </p>
 
 <style>
@@ -42,6 +59,27 @@
   .banner.warn {
     background: color-mix(in srgb, var(--danger) 12%, transparent);
     color: var(--danger);
+  }
+
+  .banner.neutral {
+    background: color-mix(in srgb, var(--fg) 7%, transparent);
+    color: var(--fg);
+  }
+
+  .action {
+    margin-left: auto;
+    padding: 0.25rem 0.6rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: inherit;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 0.5rem;
+    white-space: nowrap;
+  }
+
+  .detail + .action {
+    margin-left: 0.5rem;
   }
 
   .text {

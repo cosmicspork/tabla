@@ -5,10 +5,14 @@
     board,
     onplay,
     onresign,
+    onstage,
+    locked = false,
   }: {
     board: BoardState;
     onplay: (move: unknown) => void | Promise<boolean | void>;
     onresign?: () => void;
+    onstage?: (staged: boolean) => void;
+    locked?: boolean;
   } = $props();
 
   const SIZE = 15;
@@ -69,6 +73,22 @@
 
   const usedRackTiles = $derived(new Set(pending.values()));
 
+  /**
+   * Tells the page when a move starts and stops being built.
+   *
+   * Staging the first tile is the moment this device claims the turn from its
+   * siblings, and taking them all back is the moment it gives it up. Reading it
+   * off the staged tiles rather than firing it from every call site is what
+   * keeps the two from drifting.
+   */
+  let staging = false;
+  $effect(() => {
+    const now = pending.size > 0;
+    if (now === staging) return;
+    staging = now;
+    onstage?.(now);
+  });
+
   /** Whether a rack tile is spoken for by a tile already on the board. */
   function isUsed(index: number): boolean {
     return usedRackTiles.has(index);
@@ -95,7 +115,7 @@
   }
 
   function tapCell(cell: number) {
-    if (!yourTurn || phase !== 'play') return;
+    if (!yourTurn || locked || phase !== 'play') return;
 
     // Tapping a tile you just put down takes it back.
     if (pending.has(cell)) {
@@ -240,7 +260,7 @@
     <p class="ceremony" data-ceremony={phase}>{ceremony}</p>
   {/if}
 
-  <div class="word-board" class:waiting={!yourTurn}>
+  <div class="word-board" class:waiting={!yourTurn || locked}>
     {#each Array(225) as _, cell (cell)}
       {@const letter = letterAt(cell)}
       <button
@@ -250,7 +270,7 @@
         class:fresh={lastPlay?.cells?.includes(cell)}
         class:blank={isBlank(cell)}
         onclick={() => tapCell(cell)}
-        disabled={!yourTurn || phase !== 'play'}
+        disabled={!yourTurn || locked || phase !== 'play'}
         aria-label={`row ${Math.floor(cell / SIZE) + 1} column ${(cell % SIZE) + 1}`}
         data-cell={cell}
       >
@@ -281,7 +301,7 @@
         class:spent={isUsed(index)}
         class:discard={discards.has(index)}
         onclick={() => tapRack(index)}
-        disabled={!yourTurn || isUsed(index)}
+        disabled={!yourTurn || locked || isUsed(index)}
       >
         <span class="letter">{tile === '?' ? ' ' : tile}</span>
         {#if tile !== '?'}<span class="pip">{valueOf(tile)}</span>{/if}
@@ -291,7 +311,11 @@
 
   {#if exchanging}
     <div class="actions">
-      <button class="primary" onclick={confirmExchange} disabled={discards.size === 0 || busy}>
+      <button
+        class="primary"
+        onclick={confirmExchange}
+        disabled={discards.size === 0 || busy || locked}
+      >
         Swap {discards.size}
         {discards.size === 1 ? 'tile' : 'tiles'}
       </button>
@@ -299,15 +323,19 @@
     </div>
   {:else}
     <div class="actions">
-      <button class="primary" onclick={play} disabled={!canPlay || busy}>Play</button>
+      <button class="primary" onclick={play} disabled={!canPlay || busy || locked}>Play</button>
       {#if canChallenge}
         <button class="challenge" onclick={challenge} disabled={busy}>Challenge</button>
       {/if}
       <button onclick={recall} disabled={pending.size === 0}>Recall</button>
-      <button onclick={startExchange} disabled={!yourTurn || phase !== 'play' || bag < 7 || busy}>
+      <button
+        onclick={startExchange}
+        disabled={!yourTurn || locked || phase !== 'play' || bag < 7 || busy}
+      >
         Swap
       </button>
-      <button onclick={pass} disabled={!yourTurn || phase !== 'play' || busy}>Pass</button>
+      <button onclick={pass} disabled={!yourTurn || locked || phase !== 'play' || busy}>Pass</button
+      >
       {#if onresign && !board.outcome}
         <button class="danger resign" onclick={onresign}>Resign</button>
       {/if}
