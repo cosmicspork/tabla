@@ -12,7 +12,8 @@
  */
 import { getMeta, setMeta } from './db/store.ts';
 
-const DISPLAY_NAME = 'displayName';
+export const DISPLAY_NAME_KEY = 'displayName';
+export const ONBOARDED_KEY = 'onboarded';
 
 /**
  * What a contact is called before anyone says otherwise.
@@ -28,11 +29,11 @@ export const PLACEHOLDER_NAME = 'Opponent';
 export const MAX_NAME_LENGTH = 32;
 
 export async function displayName(): Promise<string> {
-  return (await getMeta<string>(DISPLAY_NAME)) ?? '';
+  return (await getMeta<string>(DISPLAY_NAME_KEY)) ?? '';
 }
 
 export async function setDisplayName(name: string): Promise<void> {
-  await setMeta(DISPLAY_NAME, cleanName(name));
+  await setMeta(DISPLAY_NAME_KEY, cleanName(name));
 }
 
 /**
@@ -62,9 +63,9 @@ export function cleanName(name: string): string {
  * give one, and asking again every launch would be its own kind of rude.
  */
 export async function hasOnboarded(): Promise<boolean> {
-  return (await getMeta<boolean>('onboarded')) ?? false;
+  return (await getMeta<boolean>(ONBOARDED_KEY)) ?? false;
 }
 
 export async function markOnboarded(): Promise<void> {
-  await setMeta('onboarded', true);
+  await setMeta(ONBOARDED_KEY, true);
 }

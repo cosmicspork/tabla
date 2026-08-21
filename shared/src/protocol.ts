@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 
-import { HOLD_MAX_MS, LINK_MAX_BYTES } from './constants.ts';
+import { HOLD_MAX_MS, LINK_MAX_BYTES, MAX_APPEND_ENTRIES } from './constants.ts';
 
 /** base64url without padding, as used for every binary field on the wire. */
 const b64url = z.string().regex(/^[A-Za-z0-9_-]*$/, 'expected unpadded base64url');
@@ -89,7 +89,7 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
     tipSeq: z.number().int(),
     tipHash: b64url.length(43).nullable(),
   }),
-  z.object({ t: z.literal('append'), entries: z.array(wireEntrySchema).max(256) }),
+  z.object({ t: z.literal('append'), entries: z.array(wireEntrySchema).max(MAX_APPEND_ENTRIES) }),
   z.object({ t: z.literal('req'), fromSeq: z.number().int().nonnegative() }),
   /**
    * Registers this device for content-free pushes about this game, or retires

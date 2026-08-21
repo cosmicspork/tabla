@@ -52,6 +52,8 @@ export const BLOB_ID_LEN = 16;
 
 /** Relay limits. Entries larger than this are rejected by the room DO. */
 export const MAX_ENTRY_BYTES = 64 * 1024;
+/** Most entries one WebSocket append frame may carry. */
+export const MAX_APPEND_ENTRIES = 256;
 
 /**
  * How many unread invitations one mailbox will hold.
