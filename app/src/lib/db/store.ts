@@ -4,6 +4,7 @@ import type {
   BlobRecord,
   ContactRecord,
   DealRecord,
+  DeviceRecord,
   EntryRecord,
   GameRecord,
   InboxRecord,
@@ -201,4 +202,43 @@ export async function listInbox(): Promise<InboxRecord[]> {
 
 export async function deleteInboxItem(messageId: string): Promise<void> {
   await (await db()).delete('inbox', messageId);
+}
+
+// -- devices ----------------------------------------------------------------
+
+export async function putDevice(device: DeviceRecord): Promise<void> {
+  await (await db()).put('devices', device);
+}
+
+export async function getDevice(id: string): Promise<DeviceRecord | undefined> {
+  return (await db()).get('devices', id);
+}
+
+/** Oldest first, so the list reads as the order they were linked in. */
+export async function listDevices(): Promise<DeviceRecord[]> {
+  const all = await (await db()).getAll('devices');
+  return all.sort((a, b) => a.linkedAt - b.linkedAt);
+}
+
+export async function deleteDevice(id: string): Promise<void> {
+  await (await db()).delete('devices', id);
+}
+
+/**
+ * Drops every entry after `seq`, for a log that has to be rolled back.
+ *
+ * Only ever used on entries the relay never accepted — see `Log.truncate`.
+ */
+export async function deleteEntriesFrom(gameId: string, seq: number): Promise<void> {
+  const database = await db();
+  const tx = database.transaction('entries', 'readwrite');
+  const store = tx.objectStore('entries');
+
+  let cursor = await store.openCursor(IDBKeyRange.bound([gameId, seq], [gameId, Infinity]));
+  while (cursor) {
+    await cursor.delete();
+    cursor = await cursor.continue();
+  }
+
+  await tx.done;
 }

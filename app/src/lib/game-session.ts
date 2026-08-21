@@ -10,6 +10,7 @@ import { fromBase64Url, toBase64Url } from '@tabla/shared';
 import { Deal, type DealDuty } from './deal.ts';
 import { appendEntries, getContact, loadEntries, renameContact, updateGame } from './db/store.ts';
 import type { GameRecord } from './db/schema.ts';
+import { announceContact, announceGame } from './devices.ts';
 import { loadIdentity, randomBytes } from './identity.ts';
 import { dictionaryBytes } from './dict.ts';
 import { pluginBytes } from './plugin/install.ts';
@@ -564,12 +565,19 @@ export class GameSession {
         lastPlay: summarizeLastPlay(board.view, this.player),
       };
 
-      if (board.outcome && this.game.status !== 'finished') {
+      const ending = Boolean(board.outcome) && this.game.status !== 'finished';
+      if (ending) {
         summary.status = 'finished';
-        summary.outcome = describeOutcome(board.outcome, this.player, board.resignedBy);
+        summary.outcome = describeOutcome(board.outcome!, this.player, board.resignedBy);
       }
 
       this.game = (await updateGame(this.game.gameId, summary)) ?? this.game;
+
+      // Only when a game ends, not on every move. The other devices get the
+      // moves themselves from the room, and replay them into the same summary;
+      // what they cannot work out for themselves is a game they have never
+      // opened having finished.
+      if (ending) await announceGame(this.game);
     }
 
     await this.notify();
@@ -596,12 +604,21 @@ export class GameSession {
       if (!contact || contact.name === PLACEHOLDER_NAME) await renameContact(key, name);
 
       this.game = (await updateGame(this.game.gameId, { opponentName: name })) ?? this.game;
+
+      // The other devices met this person under the placeholder too, and have
+      // no way to read the log entry that named them until they open the game.
+      await announceContact(key, name, contact?.firstSeen ?? Date.now());
     })();
   }
 
   /** Registers this device for content-free pushes about this game. */
   subscribeToPush(subscription: PushSubscriptionJSON): void {
     this.engine?.subscribeToPush(subscription as never);
+  }
+
+  /** Retires one endpoint, for a device whose owner turned notifications off. */
+  unsubscribeFromPush(endpoint: string): void {
+    this.engine?.unsubscribeFromPush(endpoint);
   }
 
   get gameKeyHash(): string {

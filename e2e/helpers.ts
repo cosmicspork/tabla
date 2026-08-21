@@ -12,17 +12,21 @@ import { expect, type BrowserContext, type Page } from '@playwright/test';
  * one exists.
  */
 export async function introduce(page: Page, name = ''): Promise<void> {
-  const start = page.getByTestId('start-playing');
+  const fork = page.getByTestId('new-here');
   const home = page.getByRole('link', { name: 'Start a new game' });
 
   // Wait for whichever of the two this device is going to show. Asking whether
   // the welcome screen is present without waiting for either races the first
   // paint, and answers "no" for a device that is about to show it.
-  await expect(start.or(home).first()).toBeVisible();
-  if (!(await start.isVisible())) return;
+  await expect(fork.or(home).first()).toBeVisible();
+  if (!(await fork.isVisible())) return;
+
+  // The first screen asks whether there is another device before it asks for a
+  // name; someone linking one has already given theirs.
+  await fork.click();
 
   if (name) await page.getByTestId('display-name').fill(name);
-  await start.click();
+  await page.getByTestId('start-playing').click();
   await expect(home).toBeVisible();
 }
 

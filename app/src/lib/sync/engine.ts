@@ -331,4 +331,14 @@ export class SyncEngine {
   subscribeToPush(subscription: PushSubscriptionJson): void {
     this.send({ t: 'push_sub', subscription });
   }
+
+  /**
+   * Tells the room this device no longer wants pushes about this game.
+   *
+   * The endpoint alone, because by the time anyone knows this the browser
+   * subscription has been given up and there is nothing else left to name.
+   */
+  unsubscribeFromPush(endpoint: string): void {
+    this.send({ t: 'push_sub', subscription: null, endpoint });
+  }
 }

@@ -9,6 +9,9 @@
    * assumed.
    */
   import { version } from '$app/environment';
+
+  import { listDevices } from '$lib/db/store.ts';
+  import { thisDevice } from '$lib/devices.ts';
   import { DICTIONARY_EN_V1 } from '@tabla/shared';
 
   import { pageTitle } from '$lib/page-title.svelte.ts';
@@ -41,9 +44,19 @@
     .join(' · ');
 
   let relay = $state('');
+  let deviceLine = $state('This one');
 
   $effect(() => {
     relay = location.host;
+  });
+
+  $effect(() => {
+    void (async () => {
+      const me = await thisDevice();
+      const all = await listDevices();
+      const at = all.findIndex((device) => device.id === me.id) + 1;
+      deviceLine = all.length <= 1 ? me.name : `${me.name} · ${at} of ${all.length} linked`;
+    })();
   });
 </script>
 
@@ -56,6 +69,10 @@
       <div class="fact">
         <dt>App version</dt>
         <dd class="mono" data-testid="app-version">{version}</dd>
+      </div>
+      <div class="fact">
+        <dt>This device <small>all of them play as the same person</small></dt>
+        <dd data-testid="device-count">{deviceLine}</dd>
       </div>
       <div class="fact">
         <dt>Rules carried <small>a game keeps the ones it started with</small></dt>

@@ -7,14 +7,16 @@
    * page is actually for is the one moment that key matters to a person:
    * checking, out loud, that the person you are playing is the person you think.
    */
+  import { listDevices } from '$lib/db/store.ts';
   import { fingerprint, myPublicKey } from '$lib/identity.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
-  import { displayName, MAX_NAME_LENGTH, setDisplayName } from '$lib/profile.ts';
+  import { changeDisplayName, displayName, MAX_NAME_LENGTH } from '$lib/profile.ts';
 
   let key = $state('');
   let name = $state('');
   let saved = $state(false);
   let showingFull = $state(false);
+  let deviceCount = $state(1);
 
   $effect(() => {
     pageTitle.text = 'Profile';
@@ -24,11 +26,12 @@
     void (async () => {
       key = await myPublicKey();
       name = await displayName();
+      deviceCount = Math.max(1, (await listDevices()).length);
     })();
   });
 
   async function save() {
-    await setDisplayName(name);
+    await changeDisplayName(name);
     saved = true;
     setTimeout(() => (saved = false), 2000);
   }
@@ -71,7 +74,8 @@
     </div>
     <p class="muted">
       Read it to a friend to be sure you are playing them and not someone who got hold of the link.
-      Nobody can look you up by it, and there is nothing else to give out.
+      Nobody can look you up by it, and there is nothing else to give out. It is the same on every
+      device you link, so a friend who has checked it once has checked it for good.
     </p>
     {#if showingFull}
       <p class="mono full" data-testid="full-key">{key}</p>
@@ -83,12 +87,12 @@
   </section>
 
   <section class="card">
-    <h2>One device at a time</h2>
+    <h2>{deviceCount === 1 ? 'One device' : `${deviceCount} devices`}</h2>
     <p class="muted">
-      Your identity lives on this phone and nowhere else. To play from a different one, make a
-      backup and restore it there — that moves the identity across. Playing as the same person from
-      two devices at once would split every shared game in half, so it is a move rather than a
-      merge.
+      {deviceCount === 1
+        ? 'Only this one plays as you so far.'
+        : 'They all play as you, with this name and this fingerprint.'}
+      <a href="/settings/devices">Manage devices</a>
     </p>
   </section>
 </div>

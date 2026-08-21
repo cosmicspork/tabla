@@ -35,6 +35,21 @@ export async function setDisplayName(name: string): Promise<void> {
   await setMeta(DISPLAY_NAME, cleanName(name));
 }
 
+/**
+ * The same, and tells this person's other devices.
+ *
+ * Separate from `setDisplayName` because applying a name that *arrived* from
+ * another device must not send it back — two devices politely informing each
+ * other of the same name is a loop with no end.
+ */
+export async function changeDisplayName(name: string): Promise<void> {
+  await setDisplayName(name);
+
+  // Imported here rather than at the top: devices reads this module.
+  const { announceName } = await import('./devices.ts');
+  await announceName(cleanName(name));
+}
+
 /** Trimmed and bounded, the same way the Rust side does it. */
 export function cleanName(name: string): string {
   return [...name.trim()].slice(0, MAX_NAME_LENGTH).join('');

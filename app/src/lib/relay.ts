@@ -2,7 +2,10 @@
 import {
   claimInviteResponseSchema,
   createInviteResponseSchema,
+  createLinkResponseSchema,
   inviteClaimStatusSchema,
+  linkStatusSchema,
+  takeLinkResponseSchema,
   pollMailboxResponseSchema,
   postMailboxResponseSchema,
   type PushSubscriptionJson,
@@ -70,6 +73,37 @@ export async function claimInvite(
 /** What the initiator polls to learn who took its link. */
 export async function inviteStatus(blobId: string) {
   return inviteClaimStatusSchema.parse(await unwrap(await fetch(`/api/invite/${blobId}`)));
+}
+
+// -- device links -----------------------------------------------------------
+
+/**
+ * Leaves this installation for another of the same person's devices.
+ *
+ * Unlike an invite, the caller names it: the id is derived from the words that
+ * are also the passphrase, so the relay cannot enumerate what it holds. A name
+ * already in use is refused rather than overwritten.
+ */
+export async function createLink(
+  linkId: string,
+  blob: string,
+): Promise<{ expiresAt: number; cancelToken: string }> {
+  return createLinkResponseSchema.parse(await unwrap(await post('/api/link', { linkId, blob })));
+}
+
+/** Collects the bundle. Works once, and the relay forgets it immediately. */
+export async function takeLink(linkId: string): Promise<string> {
+  const payload = await unwrap(await post(`/api/link/${linkId}/take`, {}));
+  return takeLinkResponseSchema.parse(payload).blob;
+}
+
+/** What the offering device polls, to know when to stop showing the words. */
+export async function linkStatus(linkId: string) {
+  return linkStatusSchema.parse(await unwrap(await fetch(`/api/link/${linkId}`)));
+}
+
+export async function cancelLink(linkId: string, cancelToken: string): Promise<void> {
+  await unwrap(await post(`/api/link/${linkId}/cancel`, { cancelToken }));
 }
 
 /** Opens the game socket. Same origin as the app, so no CORS and no cookies. */
