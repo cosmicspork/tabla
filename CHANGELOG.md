@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/cosmicspork/tabla/compare/v0.4.0...v0.4.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **app:** stop a link being spent in the browser it landed in ([#26](https://github.com/cosmicspork/tabla/issues/26)) ([e44c4d5](https://github.com/cosmicspork/tabla/commit/e44c4d5d40394e52aff0063464695dec28ea9c35))
+
 ## [0.4.0](https://github.com/cosmicspork/tabla/compare/v0.3.0...v0.4.0) (2026-08-21)
 
 
