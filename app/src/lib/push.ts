@@ -35,7 +35,17 @@ export type PushAvailability =
   | 'needs-install'
   /** The person said no. Only they can undo that, in browser settings. */
   | 'denied'
-  /** No push support, or the relay has no VAPID key configured. */
+  /**
+   * The relay has no VAPID keys, so it can notify nobody, on any device.
+   *
+   * Told apart from `unsupported` because they are not the same situation and
+   * do not have the same answer: one is this browser's limit and nothing can be
+   * done about it, the other is a secret nobody set and is fixed in a minute.
+   * Folding them together is how a relay stays unable to send anything for a
+   * month while everyone reads "this browser cannot" and believes it.
+   */
+  | 'relay-unconfigured'
+  /** This browser has no push support. */
   | 'unsupported';
 
 export function pushSupported(): boolean {
@@ -50,6 +60,11 @@ export function pushSupported(): boolean {
 export async function pushAvailability(): Promise<PushAvailability> {
   if (!pushSupported()) return 'unsupported';
 
+  // Before anything about this device, because it is not about this device: a
+  // relay with no keys sends nothing to anyone, and saying "add the app to your
+  // Home Screen first" to someone in that position wastes their afternoon.
+  if (!(await vapidPublicKey())) return 'relay-unconfigured';
+
   // On iOS a PWA in a tab cannot receive push at all, so asking would only
   // produce a prompt that cannot work.
   if (isIos() && !isStandalone()) return 'needs-install';
@@ -60,7 +75,7 @@ export async function pushAvailability(): Promise<PushAvailability> {
   const existing = await registration.pushManager.getSubscription();
   if (existing) return 'enabled';
 
-  return (await vapidPublicKey()) ? 'available' : 'unsupported';
+  return 'available';
 }
 
 let cachedKey: string | null | undefined;

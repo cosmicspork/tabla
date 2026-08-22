@@ -23,7 +23,7 @@ import {
 } from '@tabla/shared';
 import type { PushSubscriptionJson } from '@tabla/shared';
 
-import { gameIdBytes, makeChain, roomStub } from './helpers.ts';
+import { call, gameIdBytes, makeChain, roomStub } from './helpers.ts';
 
 const ALICE = toBase64Url(new Uint8Array(HASH_LEN).fill(0xa1));
 const BOB = toBase64Url(new Uint8Array(HASH_LEN).fill(0xb2));
@@ -435,5 +435,22 @@ describe('registering over HTTP', () => {
     });
 
     expect(response.status).toBe(405);
+  });
+});
+
+/**
+ * Saying out loud that push is switched on at all.
+ *
+ * A relay with no VAPID secrets is healthy in every other respect and can
+ * notify nobody: `pushConfigured` is false, so every send is skipped before it
+ * starts. That is a thing to learn from a deploy check rather than from two
+ * people wondering for a month why neither of them hears about their turns.
+ */
+describe('health', () => {
+  it('reports whether push is configured, and never the keys', async () => {
+    const body = (await (await call('/api/health')).json()) as Record<string, unknown>;
+
+    expect(body).toEqual({ ok: true, push: true });
+    expect(JSON.stringify(body)).not.toContain('VAPID');
   });
 });

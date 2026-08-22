@@ -77,6 +77,10 @@
       <li>Open tabla from your Home Screen, then come back here.</li>
     </ol>
   </div>
+{:else if availability === 'relay-unconfigured'}
+  <p class="muted">
+    This relay has no push keys set, so nobody can be notified about anything on it yet.
+  </p>
 {:else if availability === 'denied'}
   <p class="muted">
     Notifications are blocked for this site. {isIos()

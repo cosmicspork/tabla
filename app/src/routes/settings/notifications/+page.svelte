@@ -110,10 +110,16 @@
           ? 'You can change that in Settings › Notifications.'
           : "You can change that in your browser's site settings."}
       </p>
+    {:else if availability === 'relay-unconfigured'}
+      <p class="muted" data-testid="push-state">
+        This relay has no push keys set, so it cannot send a notification to anybody — not to you,
+        not to the person you are playing, not on any device. Nothing on this page will work until
+        whoever runs it sets them. Games are otherwise unaffected; you just have to come and look.
+      </p>
     {:else if availability === 'unsupported'}
       <p class="muted" data-testid="push-state">
-        This browser cannot receive them, or this relay has none configured. Games work exactly the
-        same either way — you just have to come and look.
+        This browser cannot receive them. Games work exactly the same either way — you just have to
+        come and look.
       </p>
     {:else}
       <p class="muted" data-testid="push-state">Checking…</p>

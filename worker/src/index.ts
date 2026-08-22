@@ -23,6 +23,7 @@ import {
 } from '@tabla/shared';
 
 import type { Env } from './env.ts';
+import { pushConfigured } from './push.ts';
 
 export { DeviceLinkDO } from './device-link.ts';
 export { GameRoomDO } from './game-room.ts';
@@ -53,7 +54,11 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   const path = url.pathname;
 
   if (path === '/api/health') {
-    return json({ ok: true });
+    // `push` is here because a relay with no VAPID secrets is healthy in every
+    // other respect and silently cannot notify anybody — which is a thing to
+    // find out from a deploy check rather than from nobody hearing about their
+    // turns for a month. Whether keys are set, never what they are.
+    return json({ ok: true, push: pushConfigured(env) });
   }
 
   // Clients need this to subscribe. It is public by design.

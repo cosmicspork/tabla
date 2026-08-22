@@ -577,6 +577,15 @@ device that turns notifications off has its own row dropped by the next room it
 opens, rather than left to lapse on a 410; the notification tag is the game id,
 so playing a move anywhere clears the nudge everywhere.
 
+None of it happens at all without `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`,
+set as Worker secrets. Unset, `pushConfigured` is false and every send is
+skipped before it starts, `/api/vapid` answers `null`, and no client can even
+subscribe — so the failure is total, identical for both players and every one of
+their devices, and completely silent. `/api/health` reports whether the keys are
+set (never what they are) so a deploy can be checked, and the notifications page
+says a relay has none configured rather than filing it under "this browser
+cannot", which is a different problem with a different answer.
+
 The room counts delivery attempts and records the last result, because a push
 that silently fails is otherwise invisible: the person simply never hears about
 their turn.

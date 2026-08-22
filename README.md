@@ -241,7 +241,21 @@ What the suites cover:
 Automated tests cover everything up to the push service's door; delivery itself
 cannot be exercised in CI. To check the rest by hand:
 
-1. `just vapid-keys`, set the two secrets, and deploy.
+1. `just vapid-keys`, then `wrangler secret put VAPID_PUBLIC_KEY` and
+   `wrangler secret put VAPID_PRIVATE_KEY` in `worker/`, and deploy.
+
+   **This is the whole feature.** Without those two secrets the relay sends
+   nothing to anybody — `pushConfigured` is false, so every push is skipped —
+   and the app says so on the notifications page rather than offering a switch
+   that cannot work. `wrangler deploy` does not touch secrets, so they are set
+   once and survive every deploy after; a relay that has never had them set is
+   simply a relay where notifications have never been on. Check with
+   `curl https://<your relay>/api/health`, which reports whether keys are set
+   (never what they are):
+
+   ```json
+   { "ok": true, "push": true }
+   ```
 2. Open the app on an iPhone in Safari and add it to the Home Screen. Push does
    not work in a tab on iOS, which is why the app walks you through installing.
 3. Open the app from the Home Screen, start a game, and turn on notifications
