@@ -103,6 +103,14 @@ export class GameSession {
   private holdTimer: ReturnType<typeof setInterval> | undefined;
   private beatTimer: ReturnType<typeof setInterval> | undefined;
   /**
+   * Whether a move is being built on this screen right now.
+   *
+   * Kept apart from the timer that renews the claim, because the timer belongs
+   * to a socket and this does not: a move survives the connection going away
+   * and coming back, and has to be claimed again on the other side of that.
+   */
+  private holding = false;
+  /**
    * What this device asked to be notified through, so a reconnection can say so
    * again. The relay keeps it against the socket as well as the room, and a
    * resync throws the old socket away — after which it would have gone back to
@@ -304,16 +312,36 @@ export class GameSession {
 
     await this.engine.connect();
 
-    // Said again on every connection, not once per game: `resync` builds a new
-    // socket, and the relay's record of which device is watching lives on the
-    // socket it was told about.
+    // Everything below is said again on every connection rather than once per
+    // game. A resync builds a new socket, and what the relay knows about this
+    // device it knows per socket.
+
+    // A move still being built here claims the turn again. The relay hears only
+    // from the socket that is open, and the one that made the last claim is
+    // gone — without this, a move interrupted by a pocket or a tunnel stops
+    // being announced to this person's other devices while it is still on
+    // screen being made.
+    if (this.holding) this.startHold();
+
+    // Same for which device wants telling about this game, and for saying that
+    // someone is looking at it: the room's record of both is kept against the
+    // socket it was told on.
     if (this.pushSubscription) this.engine.subscribeToPush(this.pushSubscription as never);
 
     this.startHeartbeat();
   }
 
+  /**
+   * Hangs up.
+   *
+   * The claim goes back so another device is not left waiting on a socket that
+   * has stopped talking, but `holding` stays: a resync is a disconnect and a
+   * connect, and a move that was being built before it is still being built
+   * after.
+   */
   disconnect(): void {
-    this.releaseHold();
+    this.stopRenewing();
+    this.engine?.release();
     this.stopHeartbeat();
     this.engine?.disconnect();
     this.engine = null;
@@ -353,6 +381,15 @@ export class GameSession {
    * learn only that a device id it has never seen is thinking. A token that
    * will not open is ignored: something is wrong with it, and refusing to draw
    * a board over it would be the worse failure.
+   *
+   * A claim of our own is not one: the relay replays whatever claim it is
+   * holding to a socket that has just said hello, and it cannot tell one of
+   * this person's devices from another — the body is sealed, and only we know
+   * which id is ours. Believing it locked this device out of the move it was
+   * in the middle of, with its own tiles stranded on a board it could no
+   * longer touch. It happened whenever the socket died before the claim could
+   * be given back — a phone going in a pocket, a tunnel — because reconnecting
+   * is the moment the relay hands it back.
    */
   private async onHold(body: Uint8Array | null, until: number): Promise<void> {
     if (body === null) {
@@ -362,7 +399,10 @@ export class GameSession {
 
     try {
       const device = toBase64Url(this.session.openHold(body));
-      this.heldBy = { device: await deviceName(device), until };
+      const me = await thisDevice();
+
+      // Ours, so nobody else's: the relay keeps one claim per participant.
+      this.heldBy = device === me.id ? null : { device: await deviceName(device), until };
     } catch {
       this.heldBy = null;
     }
@@ -406,6 +446,7 @@ export class GameSession {
    * is still open never reaches it at all.
    */
   startHold(): void {
+    this.holding = true;
     if (!this.engine) return;
 
     this.claim();
@@ -415,9 +456,15 @@ export class GameSession {
 
   /** Gives the turn back, so another device can take it without waiting. */
   releaseHold(): void {
+    this.holding = false;
+    this.stopRenewing();
+    this.engine?.release();
+  }
+
+  /** Stops the renewal without saying the move is over. */
+  private stopRenewing(): void {
     clearInterval(this.holdTimer);
     this.holdTimer = undefined;
-    this.engine?.release();
   }
 
   /** Takes a turn back from a device that claimed it and went quiet. */
