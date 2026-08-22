@@ -57,11 +57,16 @@ jobs:
 
   e2e-shard:
     runs-on: ubuntu-latest
-    # Split in two because a full run does not fit. Chromium holds around four
-    # gigabytes across a suite this size and the Worker another gigabyte, which
-    # on a seven-gigabyte runner is close enough to the edge that the Worker is
-    # occasionally killed — and every test after that fails with a connection
-    # error rather than anything to do with the change under test.
+    # Split in two to halve the wall clock; a full run is long enough that a
+    # red shard should not wait on a green one.
+    #
+    # This comment used to say the split existed because the Worker was being
+    # killed for memory on a seven-gigabyte runner. That was a reasonable read
+    # of the symptom — every test after a point failing on a connection error —
+    # but it was wrong, and it cost a while to find out. The Worker was exiting
+    # because `wrangler dev`'s ProxyWorker treats a severed client connection as
+    # fatal; `e2e/playwright.config.ts` has the diagnosis and the repair. Memory
+    # was never measured to be the cause, so it is no longer claimed as one.
     strategy:
       fail-fast: false
       matrix:

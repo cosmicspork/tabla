@@ -117,14 +117,23 @@ code — always opens the browser, and the app on your Home Screen keeps entirel
 separate data from Safari. Redeeming a link in the wrong one would use it up,
 start you off as somebody new, and leave the game where the app cannot see it.
 
-So on iOS, a link opened in a browser tab asks first — *do you already play
-tabla here?* — before it takes anything:
+**If the code is on a screen in front of you, scan it from inside tabla** —
+**Open a link someone sent me** on the game list, then **Scan a code**, or
+**Scan the code instead** when linking a device. That skips all of the above:
+the browser never opens, so there is nothing to copy and nothing to carry. Use
+your phone's camera app on the same QR and you get Safari instead, because a
+URL is what a camera app does with one.
+
+For a link that did arrive as a link — an invite in a chat message, mostly —
+opening it in a browser tab on iOS asks first, *do you already play tabla
+here?*, before it takes anything:
 
 - **New to tabla:** carry on where you are. Nothing is different, and it is one
   tap.
 - **Already playing:** copy the link, open tabla from your Home Screen, and tap
-  **Open a link someone sent me** on the game list. Paste it there. A device
-  link is six words, so you can just read them across.
+  **Open a link someone sent me** on the game list. Paste it there — or, if the
+  sender's QR is still on a screen you can point at, scan it and skip the copy.
+  A device link is six words, so you can just read those across.
 
 Nothing is spent until you choose, so the link is still good either way. And
 pasting works for the same reason the relay cannot read your invites: the part
@@ -225,7 +234,7 @@ What the suites cover:
 | `cargo test` | the log format, chain and signature verification, tombstone rollback refusal, key agreement, the export format, and the game rules — with frozen wire vectors so the formats cannot drift. Includes the deal: the shuffle argument against provers who duplicate, drop, or invent a tile, and the rules and the deal wired together the way the app wires them, including a player who attaches a valid proof about one tile while claiming another |
 | `worker` vitest | the relay's storage, single-use claims, retention and tombstones, and a full two-client game over real WebSockets inside workerd, including eviction and re-upload |
 | `app` vitest | that the TypeScript boundary produces the same bytes as the Rust vectors, that the relay's framing helpers agree with the core, that the committed manifest is signed by the pinned key and describes the artifacts actually committed, and that a download whose hash is wrong is refused and never stored |
-| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, an invite refusing to be spent in the browser it landed in and being carried into the app by hand, and a word game played to a challenge — including a real deal over real proofs, restoring one mid-game and finding the rack intact, downloading the game once and no more, removing it and getting it back, and each player being told when the other arrives and leaves |
+| `e2e` | two real browser profiles playing to a result, single-use invites, surviving relay data loss, backup and migration into a fresh profile, the iOS install/offline paths, an invite refusing to be spent in the browser it landed in, being carried into the app by hand, and being scanned straight into it off another screen, and a word game played to a challenge — including a real deal over real proofs, restoring one mid-game and finding the rack intact, downloading the game once and no more, removing it and getting it back, and each player being told when the other arrives and leaves |
 
 ## Verifying push on a real device
 
@@ -260,6 +269,11 @@ app where a real one does not:
    me** in the app. The game should open there, and only there.
 9. Answer the other way on a device with no tabla installed. It should join in
    the tab, as it always has.
+10. Show the same invite's QR on another screen and scan it from inside the
+    installed app instead. Safari should never appear. This is the one path
+    automated tests can only approximate — they feed the scanner a canvas rather
+    than a lens, and a simulated iPhone is Chromium, so the camera behaving in a
+    Home Screen app is a real-hardware question.
 
 ## CI, releases, and deploys
 

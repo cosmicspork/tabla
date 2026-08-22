@@ -18,13 +18,14 @@
 
   import Mark from '$lib/components/Mark.svelte';
   import OpenInApp from '$lib/components/OpenInApp.svelte';
+  import QrScanner from '$lib/components/QrScanner.svelte';
   import StatusBanner from '$lib/components/StatusBanner.svelte';
-  import { opensOutsideTheApp } from '$lib/handoff.ts';
+  import { linkWordsFrom, opensOutsideTheApp } from '$lib/handoff.ts';
   import { identityExists } from '$lib/identity.ts';
   import { LinkError, LINK_WORD_COUNT, takeLink, unknownWords } from '$lib/link.ts';
   import { MAX_NAME_LENGTH } from '$lib/profile.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
-  import { scanForWords, scanningAvailable } from '$lib/scan.ts';
+  import { scanningAvailable } from '$lib/scan.ts';
 
   let words = $state('');
   let name = $state('');
@@ -69,17 +70,9 @@
       .filter(Boolean).length === LINK_WORD_COUNT && missing.length === 0,
   );
 
-  async function scan() {
+  function openScanner() {
     scanning = true;
     failure = '';
-    try {
-      const found = await scanForWords();
-      if (found) words = found;
-    } catch (error) {
-      failure = error instanceof Error ? error.message : 'The camera could not be opened.';
-    } finally {
-      scanning = false;
-    }
   }
 
   async function link() {
@@ -151,11 +144,19 @@
         </p>
       {/if}
 
-      {#if scanningAvailable()}
+      {#if scanning}
+        <QrScanner
+          recognise={linkWordsFrom}
+          label="Point the camera at the code on your other device."
+          ondetect={(found) => {
+            words = found;
+            scanning = false;
+          }}
+          onclose={() => (scanning = false)}
+        />
+      {:else if scanningAvailable()}
         <div>
-          <button onclick={scan} disabled={scanning}>
-            {scanning ? 'Looking…' : 'Scan the code instead'}
-          </button>
+          <button onclick={openScanner} data-testid="scan">Scan the code instead</button>
         </div>
       {/if}
     </section>

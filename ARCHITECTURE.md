@@ -412,6 +412,33 @@ is a list that goes stale. Someone who lands in one joins as a new person, as
 they always have; `/open` is the way back, and it is on the game list rather
 than behind a link precisely so it can be reached without one.
 
+### Reading the code instead of following it
+
+There is a shorter route whenever the code is on a screen in front of you, and
+it is to not let the link out of the app at all. Reading a QR with the phone's
+camera app opens Safari, because a URL is what a camera app does; reading it
+from inside tabla skips the browser, the clipboard, and everything above. Both
+`/open` and `/link` offer it.
+
+That was not possible while scanning meant `BarcodeDetector`, which Safari does
+not have — so the one platform where a link cannot reach the installed app was
+also the only one never offered a scanner, and the QR on screen was decoration.
+A decoder now ships for the engines without a native one: jsQR, vendored at
+`static/qr/` and kept out of the install-time precache beside the word list and
+the downloadable games, fetched on the first tap of Scan by the devices that
+need it and by no others. Around 57 kB, once, on Safari.
+
+`scan.ts` decides between the two decoders and knows nothing else; in
+particular it does not know what a code *means*. The scanner hands raw decoded
+text to whatever function the caller passes — `parseSharedLink` on `/open`,
+`linkWordsFrom` on `/link` — which are the same functions behind the paste box
+and the words field. A scan therefore cannot accept something a paste would
+refuse, and a stray code the camera catches is not an error but a frame to keep
+scanning past.
+
+The hand-off below is what remains for the codes that are not in front of you —
+an invite that arrived in a chat message, which is most of them.
+
 The hand-off is manual because it has to be: an installed web app on iOS cannot
 be sent a URL. `/open` is the other end of it — paste the link, or the six
 words, and it is dispatched. That works for the same reason the relay cannot
@@ -532,7 +559,9 @@ iOS constraints shape the UX rather than being worked around:
 - cached assets may be evicted after roughly a week of inactivity,
 - Background Sync is unavailable, so sync runs on app open and on push,
 - an installed app and Safari keep separate storage, and links always open
-  Safari — see "Which browser the link opened in".
+  Safari — see "Which browser the link opened in",
+- there is no `BarcodeDetector`, so scanning a code needs a decoder shipped for
+  it — see "Reading the code instead of following it".
 
 The app detects standalone mode, shows an install walkthrough to Safari users,
 and asks for notification permission only from a button, only after the first

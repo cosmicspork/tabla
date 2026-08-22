@@ -11,3 +11,9 @@ build/
 # Signed exactly as stored: reformatting either would invalidate the signature.
 src/lib/plugin/manifest.json
 src/lib/plugin/manifest.sig
+
+# jsQR, vendored from upstream and wrapped in an ES-module shim. Reformatting it
+# would make the committed file something other than what was published, for no
+# benefit — nobody edits it, and diffing it against a fresh `npm pack` is how it
+# gets re-vendored.
+static/qr/

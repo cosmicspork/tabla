@@ -33,16 +33,22 @@ export default {
     // Registered automatically. It caches the app shell only; game data lives
     // in IndexedDB and is never written to a cache.
     //
-    // Downloadable games and their word lists are excluded from the
-    // install-time precache. They are hundreds of kilobytes each and matter
+    // Downloadable games, their word lists, and the QR decoder are excluded
+    // from the install-time precache. They are hundreds of kilobytes each and matter
     // only to the people who play those games, so making every visitor take
     // one before the app will start would be a poor trade. They are fetched on
     // first use, checked against the signed manifest, and kept in the database
     // — which, unlike a cache, survives an app update and can be given back
     // when a player removes the game.
+    //
+    // `qr/` is the same trade for the same reason. Only an engine without
+    // `BarcodeDetector` needs a decoder at all — Safari, in practice — and only
+    // once somebody taps Scan. Precaching it would hand it to every device on
+    // install, including all the ones that will never run a line of it.
     serviceWorker: {
       register: true,
-      files: (path) => !path.startsWith('dict/') && !path.startsWith('plugins/'),
+      files: (path) =>
+        !path.startsWith('dict/') && !path.startsWith('plugins/') && !path.startsWith('qr/'),
     },
     alias: { $shared: '../shared/src' },
   },

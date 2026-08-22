@@ -15,14 +15,24 @@
    * Whatever survived the trip is accepted — a whole URL, a bare fragment, or
    * six words read aloud — because the alternative is telling somebody their
    * one-use link is not a link.
+   *
+   * Better still, when the code is on a screen in front of you: scan it here and
+   * the trip does not happen at all. Reading it with the phone's own camera app
+   * opens Safari, because that is what a camera app does with a URL; reading it
+   * from inside the app skips the browser, the clipboard, and this page's whole
+   * reason for existing. The scan and the paste end in the same parser, so
+   * neither can accept what the other would refuse.
    */
   import { goto } from '$app/navigation';
 
+  import QrScanner from '$lib/components/QrScanner.svelte';
   import { parseSharedLink } from '$lib/handoff.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
+  import { scanningAvailable } from '$lib/scan.ts';
 
   let text = $state('');
   let failure = $state('');
+  let scanning = $state(false);
 
   $effect(() => {
     pageTitle.text = 'Open a link';
@@ -69,6 +79,18 @@
     <p class="notice warn">{failure}</p>
   {/if}
 
+  {#if scanning}
+    <QrScanner
+      recognise={parseSharedLink}
+      label="Point the camera at the code."
+      ondetect={(link) => {
+        scanning = false;
+        void goto(link.to);
+      }}
+      onclose={() => (scanning = false)}
+    />
+  {/if}
+
   <section class="card stack">
     <label>
       <span class="muted">The link, or the six words</span>
@@ -85,6 +107,9 @@
 
     <div class="row">
       <button onclick={pasteFromClipboard} data-testid="paste-from-clipboard">Paste</button>
+      {#if scanningAvailable()}
+        <button onclick={() => (scanning = true)} data-testid="scan">Scan a code</button>
+      {/if}
     </div>
 
     {#if link}
