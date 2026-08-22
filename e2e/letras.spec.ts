@@ -23,6 +23,15 @@ test('two players play a word through the relay', async ({ browser }) => {
   await expect(waiter.locator('.square.filled')).toHaveCount(indices.length, {
     timeout: 30_000,
   });
+
+  // And they are marked as the last play on both boards — as the last play,
+  // not as tiles being placed, which is a different state wearing what used to
+  // be the same green ring. Nothing is staged on either device, so nothing
+  // should be wearing the staged mark.
+  await expect(waiter.locator('.square.fresh')).toHaveCount(indices.length);
+  await expect(waiter.locator('.square.staged')).toHaveCount(0);
+  await expect(mover.locator('.square.fresh')).toHaveCount(indices.length);
+  await expect(mover.locator('.square.staged')).toHaveCount(0);
   await expect(waiter.getByText('Your turn.')).toBeVisible({ timeout: 30_000 });
 
   // The rack is short until the opponent moves, and the UI says why. Drawing
@@ -46,14 +55,25 @@ test('a word that is not a word is refused, and the tiles stay put', async ({ br
   await playWord(mover, indices);
 
   // Refused by the rules, so it was never sealed into the log — the opponent
-  // has nothing to see and nothing to dispute.
-  await expect(mover.getByText(/is not in the word list/)).toBeVisible({ timeout: 30_000 });
+  // has nothing to see and nothing to dispute. The reason is said on the board,
+  // beside the tiles it is about, rather than at the top of a page that is
+  // taller than the screen by the time there is a board on it.
+  const refusal = mover.getByTestId('refusal');
+  await expect(refusal).toContainText(/is not in the word list/, { timeout: 30_000 });
   await expect(other.locator('.square.filled')).toHaveCount(0);
 
   // And the tiles are still where they were put, so one letter can be changed
-  // rather than the whole word laid out again.
+  // rather than the whole word laid out again — and they say so themselves.
   await expect(mover.locator('.square.filled')).toHaveCount(indices.length);
+  await expect(mover.locator('.square.refused')).toHaveCount(indices.length);
   await expect(mover.getByText('Your turn.')).toBeVisible();
+
+  // Changing the placement is what takes the message away, rather than a timer:
+  // it answers a question about tiles that are no longer arranged that way.
+  // `playWord` lays the word along the centre row from the middle square.
+  await mover.locator('[data-cell="112"]').click();
+  await expect(refusal).toHaveCount(0);
+  await expect(mover.locator('.square.refused')).toHaveCount(0);
 
   await one.close();
   await two.close();
