@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/cosmicspork/tabla/compare/v0.4.1...v0.5.0) (2026-08-22)
+
+
+### Features
+
+* **app:** read a code with the camera, on the platform that needs it most ([#28](https://github.com/cosmicspork/tabla/issues/28)) ([5f124f5](https://github.com/cosmicspork/tabla/commit/5f124f5350d9345ac22b2cd7b27bbb11b39125c8))
+
 ## [0.4.1](https://github.com/cosmicspork/tabla/compare/v0.4.0...v0.4.1) (2026-08-21)
 
 
