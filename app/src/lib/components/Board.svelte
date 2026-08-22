@@ -10,7 +10,7 @@
     locked = false,
   }: {
     board: BoardState;
-    onplay: (move: unknown) => void;
+    onplay: (move: unknown) => void | Promise<boolean | string | void>;
     /** Another of this person's devices is mid-move. There is no staging step
      *  here — a tap is the whole move — so this only ever greys the grid. */
     locked?: boolean;
@@ -22,7 +22,27 @@
   const legal = $derived(new Set((board.view.legalMoves ?? []) as number[]));
   const winning = $derived(new Set((board.view.winningLine ?? []) as number[]));
   const yourTurn = $derived(Boolean(board.view.yourTurn) && !board.outcome);
+
+  /**
+   * Why the rules would not take the last tap, if they would not.
+   *
+   * A cell that is not a legal move is already disabled, so there is nothing
+   * here a player should be able to reach. It is here anyway because the
+   * refusal now comes back to the board instead of going to the page, and a
+   * board that dropped it would turn an impossible case into a silent one.
+   */
+  let refusal = $state<string | null>(null);
+
+  async function tap(cell: number) {
+    const result = await onplay({ cell });
+    if (result === false) refusal = 'The rules would not take that move.';
+    else refusal = typeof result === 'string' ? result : null;
+  }
 </script>
+
+{#if refusal}
+  <p class="notice warn" role="alert">{refusal}</p>
+{/if}
 
 <div class="board" class:done={Boolean(board.outcome) || locked}>
   {#each cells as mark, cell (cell)}
@@ -31,7 +51,7 @@
       class:won={winning.has(cell)}
       disabled={!yourTurn || locked || !legal.has(cell)}
       aria-label={mark === null ? `Play cell ${cell + 1}` : `Cell ${cell + 1}, ${marks[mark]}`}
-      onclick={() => onplay({ cell })}
+      onclick={() => void tap(cell)}
     >
       {mark === null ? '' : marks[mark]}
     </button>

@@ -19,8 +19,16 @@ import type { BoardState } from './game-session.ts';
 /** Every board takes the same props; what a move *is* varies by game. */
 export type BoardProps = {
   board: BoardState;
-  /** Returns `false` if the rules refused the move, so a board can react. */
-  onplay: (move: unknown) => void | Promise<boolean | void>;
+  /**
+   * Plays a move, and says what became of it.
+   *
+   * `false`, or the refusal in words where the rules gave one, so that a board
+   * can leave the tiles where they are and say why beside them. The reason
+   * belongs next to the move being corrected: a board can be taller than the
+   * screen, and a message at the top of the page is a message nobody reading
+   * the board can see.
+   */
+  onplay: (move: unknown) => void | Promise<boolean | string | void>;
   /**
    * Give up.
    *
