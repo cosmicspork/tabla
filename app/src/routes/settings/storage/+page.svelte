@@ -153,9 +153,7 @@
 
 <div class="stack">
   <p class="muted intro">
-    Games other than tic tac toe are downloaded the first time you play one and checked against a
-    signature before they run. Removing one is safe: it comes back the next time you open a game
-    that needs it.
+    Removing a game is safe — it downloads itself again the next time you open one that needs it.
   </p>
 
   {#if failure}
@@ -163,9 +161,7 @@
   {/if}
 
   {#if reclaimed}
-    <p class="notice" data-testid="reclaimed">
-      Freed {reclaimed} of rules no game was using any more.
-    </p>
+    <p class="notice" data-testid="reclaimed">Freed {reclaimed} no game was still using.</p>
   {/if}
 
   {#each games as game (game.id)}
@@ -194,10 +190,6 @@
             </div>
           {/each}
         </dl>
-        <p class="muted note">
-          A game keeps the rules it started under, so an older version stays until the last game
-          using it is finished — then it is removed on its own.
-        </p>
       {/if}
     </section>
   {/each}
@@ -207,7 +199,7 @@
       <div class="setting">
         <span class="label">
           <b>{entry.title}</b>
-          <small>Built in · always available, with or without a connection</small>
+          <small>Built in · always available</small>
         </span>
       </div>
     </section>
@@ -218,10 +210,5 @@
   .intro {
     margin: 0;
     font-size: 0.9rem;
-  }
-
-  .note {
-    margin: 0;
-    font-size: 0.8rem;
   }
 </style>

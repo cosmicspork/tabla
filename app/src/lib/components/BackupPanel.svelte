@@ -62,7 +62,7 @@
       const summary: ImportSummary = await importBackup(importPassphrase, bytes);
       importMessage = {
         kind: 'ok',
-        text: `This device is now one of yours. Restored ${summary.games} game${summary.games === 1 ? '' : 's'} and ${summary.contacts} contact${summary.contacts === 1 ? '' : 's'}. Reload to see them.`,
+        text: `Restored ${summary.games} game${summary.games === 1 ? '' : 's'} and ${summary.contacts} contact${summary.contacts === 1 ? '' : 's'}. Reload to see them.`,
       };
       importPassphrase = '';
       file = null;
@@ -124,9 +124,8 @@
   <details class="muted small">
     <summary>Why a passphrase is required</summary>
     <p>
-      The file holds your identity key as well as your games — without the key the games cannot be
-      read at all, so the two have to travel together. That makes the file worth exactly as much as
-      your account would be if there were one, which is why it is never written unencrypted.
+      The file holds your identity key as well as your games, so it is worth as much as an account
+      would be. It is never written unencrypted.
     </p>
   </details>
 </section>
@@ -176,10 +175,8 @@
   <details class="muted small">
     <summary>Why this replaces what is here</summary>
     <p>
-      Restoring takes on the identity in the backup, and a device can only be one person. What is
-      already on this one is not merged with it — there is no way to reconcile two histories of the
-      same game — so it is replaced. Afterwards this device is one of that identity's, beside any
-      others still running.
+      Restoring takes on the identity in the backup, and a device can only be one person. Two
+      histories of the same game cannot be reconciled, so this one is replaced rather than merged.
     </p>
   </details>
 </section>
