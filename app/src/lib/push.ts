@@ -7,11 +7,13 @@
  * detects standalone mode, walks Safari users through installing, and only ever
  * asks for permission from a button the person pressed.
  */
-import { fromBase64Url } from '@tabla/shared';
+import { fromBase64Url, toBase64Url } from '@tabla/shared';
 import type { PushSubscriptionJson } from '@tabla/shared';
 
-import { getMeta, setMeta } from './db/store.ts';
+import { getMeta, listGames, setMeta } from './db/store.ts';
+import { loadIdentity } from './identity.ts';
 import { isIos, isStandalone } from './lifecycle.ts';
+import { registerGamePush } from './relay.ts';
 
 /**
  * Whether this device asked for notifications.
@@ -33,7 +35,17 @@ export type PushAvailability =
   | 'needs-install'
   /** The person said no. Only they can undo that, in browser settings. */
   | 'denied'
-  /** No push support, or the relay has no VAPID key configured. */
+  /**
+   * The relay has no VAPID keys, so it can notify nobody, on any device.
+   *
+   * Told apart from `unsupported` because they are not the same situation and
+   * do not have the same answer: one is this browser's limit and nothing can be
+   * done about it, the other is a secret nobody set and is fixed in a minute.
+   * Folding them together is how a relay stays unable to send anything for a
+   * month while everyone reads "this browser cannot" and believes it.
+   */
+  | 'relay-unconfigured'
+  /** This browser has no push support. */
   | 'unsupported';
 
 export function pushSupported(): boolean {
@@ -48,6 +60,11 @@ export function pushSupported(): boolean {
 export async function pushAvailability(): Promise<PushAvailability> {
   if (!pushSupported()) return 'unsupported';
 
+  // Before anything about this device, because it is not about this device: a
+  // relay with no keys sends nothing to anyone, and saying "add the app to your
+  // Home Screen first" to someone in that position wastes their afternoon.
+  if (!(await vapidPublicKey())) return 'relay-unconfigured';
+
   // On iOS a PWA in a tab cannot receive push at all, so asking would only
   // produce a prompt that cannot work.
   if (isIos() && !isStandalone()) return 'needs-install';
@@ -58,7 +75,7 @@ export async function pushAvailability(): Promise<PushAvailability> {
   const existing = await registration.pushManager.getSubscription();
   if (existing) return 'enabled';
 
-  return (await vapidPublicKey()) ? 'available' : 'unsupported';
+  return 'available';
 }
 
 let cachedKey: string | null | undefined;
@@ -112,11 +129,11 @@ export async function enablePush(): Promise<PushSubscriptionJson | null> {
 /**
  * Turns notifications off for this device.
  *
- * Unsubscribing is the whole of it: the relay keeps a subscription per game
- * room, and there is no message on the wire for withdrawing one — but a push to
- * an unsubscribed endpoint comes back 404 or 410, and the room drops the row
- * when it does. So the rows lapse rather than being deleted, and nothing is
- * ever delivered in the meantime.
+ * Every room this device plays in is told directly, because each holds a row
+ * per endpoint and a row nobody retires is a push going to a device whose owner
+ * said no, on behalf of a person who did not. A room that cannot be reached
+ * keeps its row; the endpoint is remembered so the next board opened can say
+ * so, and failing even that the row lapses when the push service answers 410.
  *
  * The browser permission is deliberately left alone. Only the person can grant
  * or revoke that, and taking it away here would mean asking for it again later.
@@ -127,11 +144,10 @@ export async function disablePush(): Promise<void> {
   const registration = await navigator.serviceWorker.getRegistration();
   const subscription = await registration?.pushManager.getSubscription();
 
-  // Remembered so that the next game this device opens can tell that room to
-  // drop the row rather than leaving it to lapse. It matters more than it did:
-  // a room now holds one row per device, so a stale one is a push going to a
-  // device whose owner turned them off, on behalf of a person who did not.
-  if (subscription) await setMeta(RETIRED_ENDPOINT, subscription.endpoint);
+  if (subscription) {
+    await setMeta(RETIRED_ENDPOINT, subscription.endpoint);
+    await retireGamesFromPush(subscription.endpoint);
+  }
 
   await subscription?.unsubscribe();
 }
@@ -157,4 +173,80 @@ export async function currentSubscription(): Promise<PushSubscriptionJson | null
   const registration = await navigator.serviceWorker.ready;
   const subscription = await registration.pushManager.getSubscription();
   return subscription ? (subscription.toJSON() as PushSubscriptionJson) : null;
+}
+
+// -- telling the rooms ------------------------------------------------------
+
+/**
+ * Games whose room could still have something to say. A finished game has
+ * nothing left to notify about, and an unclaimed invite has no opponent yet.
+ */
+async function notifiableGames(): Promise<string[]> {
+  const games = await listGames();
+  return games.filter((game) => game.status === 'active').map((game) => game.gameId);
+}
+
+/**
+ * Says the same thing to every room this device plays in.
+ *
+ * Best effort throughout: one unreachable room must not cost the others their
+ * notifications, and every board re-registers on open regardless.
+ */
+async function tellRooms(
+  subscription: PushSubscriptionJson | null,
+  endpoint?: string,
+): Promise<void> {
+  const [gameIds, { identity }] = await Promise.all([notifiableGames(), loadIdentity()]);
+  const keyHash = toBase64Url(identity.keyHash());
+
+  await Promise.all(
+    gameIds.map((gameId) =>
+      registerGamePush(gameId, keyHash, subscription, endpoint).catch(() => {}),
+    ),
+  );
+}
+
+/**
+ * Tells every game this device is in that it wants notifications.
+ *
+ * Notifications are one decision about all of them, made in settings — but a
+ * room only ever heard about a subscription down its own socket, so turning
+ * them on left every game already in progress silent until its board happened
+ * to be opened again. Which is exactly the shape of "I turned notifications on
+ * and never got told it was my turn".
+ */
+export async function registerGamesForPush(subscription: PushSubscriptionJson): Promise<void> {
+  await tellRooms(subscription);
+}
+
+/**
+ * Tells every game this device is in to stop, for a subscription just given up.
+ *
+ * The rows would lapse on their own once the endpoint starts returning 410, but
+ * "lapse" means pushes to a device whose owner said no, on behalf of a person
+ * who did not, for as long as the push service takes to notice.
+ */
+export async function retireGamesFromPush(endpoint: string): Promise<void> {
+  await tellRooms(null, endpoint);
+}
+
+/**
+ * Takes down the nudge about a game, now that its board is open.
+ *
+ * The relay decides per device whether to send one, and it errs towards sending
+ * — a socket that has gone quiet may be a frozen phone, and the wrong guess
+ * there is silence about a turn. So the correction belongs on this side: when
+ * the board is actually in front of someone, the notification about it has
+ * nothing left to say.
+ */
+export async function clearGameNotifications(gameId: string): Promise<void> {
+  if (!pushSupported()) return;
+
+  try {
+    const registration = await navigator.serviceWorker.getRegistration();
+    const shown = await registration?.getNotifications({ tag: `game-${gameId}` });
+    for (const notification of shown ?? []) notification.close();
+  } catch {
+    // Not every engine implements `getNotifications`; nothing here is load-bearing.
+  }
 }

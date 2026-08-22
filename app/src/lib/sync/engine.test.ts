@@ -9,7 +9,7 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { PROTOCOL_VERSION, entryHash, toBase64Url } from '@tabla/shared';
+import { HEARTBEAT_REQUEST, PROTOCOL_VERSION, entryHash, toBase64Url } from '@tabla/shared';
 import type { ClientMessage, ServerMessage } from '@tabla/shared';
 
 import { loadCoreFromDisk } from '../wasm/node.ts';
@@ -31,9 +31,12 @@ beforeAll(async () => {
 /** A socket the test drives from both ends. */
 class FakeSocket implements SocketLike {
   readonly sent: ClientMessage[] = [];
+  /** The exact frames, for the one message whose bytes have to match. */
+  readonly frames: string[] = [];
   private listeners: ((event: { data: unknown }) => void)[] = [];
 
   send(data: string): void {
+    this.frames.push(data);
     this.sent.push(JSON.parse(data) as ClientMessage);
   }
 
@@ -72,10 +75,11 @@ async function game(totalEntries = 2) {
   }
 
   const socket = new FakeSocket();
-  const events: { holds: (string | null)[]; rolled: { from: number; count: number }[] } = {
-    holds: [],
-    rolled: [],
-  };
+  const events: {
+    holds: (string | null)[];
+    rolled: { from: number; count: number }[];
+    errors: string[];
+  } = { holds: [], rolled: [], errors: [] };
 
   const engine = new SyncEngine({
     core,
@@ -85,6 +89,7 @@ async function game(totalEntries = 2) {
     transport: async () => socket,
     onHold: (body) => events.holds.push(body === null ? null : toBase64Url(body)),
     onRolledBack: (from, count) => events.rolled.push({ from, count }),
+    onError: (code) => events.errors.push(code),
   });
 
   await engine.connect();
@@ -233,5 +238,34 @@ describe('uploading a long local history', () => {
     expect(sent.map((entry) => entry.seq)).toEqual(Array.from({ length: 600 }, (_, seq) => seq));
     expect(engine.pendingCount).toBe(0);
     expect(engine.status).toBe('synced');
+  });
+});
+
+/**
+ * Saying that someone is actually looking.
+ *
+ * The relay cannot otherwise tell an attentive player from a socket whose
+ * device was frozen with the page open, and it used to assume the second was
+ * the first — which is a turn nobody was ever told about.
+ */
+describe('the heartbeat', () => {
+  it('sends the exact frame the relay auto-responds to', async () => {
+    const { engine, socket } = await game();
+
+    engine.heartbeat();
+
+    // Byte-for-byte: a Durable Object's auto-response matches the request
+    // string literally, so this must not depend on how a schema orders keys.
+    expect(socket.frames).toContain(HEARTBEAT_REQUEST);
+  });
+
+  it('takes the answer in its stride', async () => {
+    const { socket, events } = await game();
+
+    socket.deliver({ t: 'pong' });
+
+    // The answer carries nothing; arriving at all was the point. What must not
+    // happen is the engine reporting a frame it does not understand.
+    expect(events.errors).toHaveLength(0);
   });
 });

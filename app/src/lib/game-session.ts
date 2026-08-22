@@ -5,7 +5,7 @@
  * the board out as a plain view object the UI can render. Keeps Svelte out of
  * it entirely so the same logic can be exercised without a browser.
  */
-import { fromBase64Url, toBase64Url } from '@tabla/shared';
+import { HEARTBEAT_MS, fromBase64Url, toBase64Url } from '@tabla/shared';
 
 import { Deal, type DealDuty } from './deal.ts';
 import {
@@ -101,6 +101,7 @@ export class GameSession {
   /** The claim on this turn, if one of this person's other devices has it. */
   private heldBy: { device: string; until: number } | null = null;
   private holdTimer: ReturnType<typeof setInterval> | undefined;
+  private beatTimer: ReturnType<typeof setInterval> | undefined;
   /**
    * Whether a move is being built on this screen right now.
    *
@@ -109,6 +110,13 @@ export class GameSession {
    * and coming back, and has to be claimed again on the other side of that.
    */
   private holding = false;
+  /**
+   * What this device asked to be notified through, so a reconnection can say so
+   * again. The relay keeps it against the socket as well as the room, and a
+   * resync throws the old socket away — after which it would have gone back to
+   * treating this device as one that never asked.
+   */
+  private pushSubscription: PushSubscriptionJSON | null = null;
   private rolledBackNote: string | undefined;
   private lastError: string | null = null;
 
@@ -304,12 +312,23 @@ export class GameSession {
 
     await this.engine.connect();
 
+    // Everything below is said again on every connection rather than once per
+    // game. A resync builds a new socket, and what the relay knows about this
+    // device it knows per socket.
+
     // A move still being built here claims the turn again. The relay hears only
     // from the socket that is open, and the one that made the last claim is
     // gone — without this, a move interrupted by a pocket or a tunnel stops
     // being announced to this person's other devices while it is still on
     // screen being made.
     if (this.holding) this.startHold();
+
+    // Same for which device wants telling about this game, and for saying that
+    // someone is looking at it: the room's record of both is kept against the
+    // socket it was told on.
+    if (this.pushSubscription) this.engine.subscribeToPush(this.pushSubscription as never);
+
+    this.startHeartbeat();
   }
 
   /**
@@ -323,9 +342,36 @@ export class GameSession {
   disconnect(): void {
     this.stopRenewing();
     this.engine?.release();
+    this.stopHeartbeat();
     this.engine?.disconnect();
     this.engine = null;
     this.heldBy = null;
+  }
+
+  /**
+   * Tells the relay, while this board is on screen, that it still is.
+   *
+   * The relay reads silence as nobody looking and sends the notification. That
+   * is deliberate: a socket alone proves only that a connection was never torn
+   * down, and a phone frozen on the lock screen keeps one. Only while visible —
+   * a hidden tab's timers are throttled to about a beat a minute, and someone
+   * who cannot see the board is precisely who should be told.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+
+    const beat = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      this.engine?.heartbeat();
+    };
+
+    beat();
+    this.beatTimer = setInterval(beat, HEARTBEAT_MS);
+  }
+
+  private stopHeartbeat(): void {
+    clearInterval(this.beatTimer);
+    this.beatTimer = undefined;
   }
 
   /**
@@ -804,11 +850,13 @@ export class GameSession {
 
   /** Registers this device for content-free pushes about this game. */
   subscribeToPush(subscription: PushSubscriptionJSON): void {
+    this.pushSubscription = subscription;
     this.engine?.subscribeToPush(subscription as never);
   }
 
   /** Retires one endpoint, for a device whose owner turned notifications off. */
   unsubscribeFromPush(endpoint: string): void {
+    if (this.pushSubscription?.endpoint === endpoint) this.pushSubscription = null;
     this.engine?.unsubscribeFromPush(endpoint);
   }
 

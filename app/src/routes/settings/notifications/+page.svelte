@@ -15,6 +15,7 @@
     enablePush,
     pushAvailability,
     pushPreference,
+    registerGamesForPush,
     type PushAvailability,
   } from '$lib/push.ts';
 
@@ -39,9 +40,16 @@
     busy = true;
     try {
       const subscription = await enablePush();
-      // Every mailbox this device watches, as well as the games it is in: an
-      // invitation arrives in one and a move in the other.
-      if (subscription) await registerInboxPush(subscription).catch(() => {});
+      // Every mailbox this device watches, and every game it is in: an
+      // invitation arrives in one and a move in the other. Switching them on
+      // here has to reach the games already under way — waiting until each
+      // board is next opened is a person hearing nothing about their turns.
+      if (subscription) {
+        await Promise.all([
+          registerInboxPush(subscription).catch(() => {}),
+          registerGamesForPush(subscription),
+        ]);
+      }
       await refresh();
     } finally {
       busy = false;
@@ -99,6 +107,11 @@
         Notifications are blocked for this site. {isIos()
           ? 'You can change that in Settings › Notifications.'
           : "You can change that in your browser's site settings."}
+      </p>
+    {:else if availability === 'relay-unconfigured'}
+      <p class="muted" data-testid="push-state">
+        This relay has no push keys set, so it can send nothing to anybody — on any device, to
+        either player — until whoever runs it adds them.
       </p>
     {:else if availability === 'unsupported'}
       <p class="muted" data-testid="push-state">

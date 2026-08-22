@@ -11,6 +11,7 @@
  * is the queue, which removes a whole class of bugs where the two disagree.
  */
 import {
+  HEARTBEAT_REQUEST,
   MAX_APPEND_ENTRIES,
   PROTOCOL_VERSION,
   clientMessageSchema,
@@ -236,6 +237,9 @@ export class SyncEngine {
         );
       case 'err':
         return this.onError(message.data);
+      case 'pong':
+        // Nothing to do: the relay noted the beat, which was the whole errand.
+        return;
     }
   }
 
@@ -380,6 +384,21 @@ export class SyncEngine {
 
   private settle(): void {
     this.setStatus(this.pendingCount === 0 ? 'synced' : 'syncing');
+  }
+
+  /**
+   * Says that someone is still looking at this board.
+   *
+   * Sent as the literal frame the room's auto-response matches, rather than
+   * through `send`, because that match is byte-for-byte and must not depend on
+   * how a schema happens to order its keys.
+   *
+   * Without it the relay cannot tell an attentive player from a socket whose
+   * device was frozen with the page open, and it used to guess the second was
+   * the first — which is a turn nobody was ever told about.
+   */
+  heartbeat(): void {
+    this.socket?.send(HEARTBEAT_REQUEST);
   }
 
   /** Registers this device to receive content-free pushes for this game. */

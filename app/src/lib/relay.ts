@@ -21,13 +21,16 @@ export class RelayError extends Error {
   }
 }
 
-async function post(path: string, body: unknown): Promise<Response> {
+async function send(method: string, path: string, body: unknown): Promise<Response> {
   return fetch(path, {
-    method: 'POST',
+    method,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
 }
+
+const post = (path: string, body: unknown) => send('POST', path, body);
+const put = (path: string, body: unknown) => send('PUT', path, body);
 
 async function unwrap(response: Response): Promise<unknown> {
   const payload = await response.json().catch(() => ({}));
@@ -104,6 +107,26 @@ export async function linkStatus(linkId: string) {
 
 export async function cancelLink(linkId: string, cancelToken: string): Promise<void> {
   await unwrap(await post(`/api/link/${linkId}/cancel`, { cancelToken }));
+}
+
+/**
+ * Registers, or retires, this device's push subscription for one game, without
+ * opening that game's board.
+ *
+ * Notifications are switched on once, in settings, for every game at once — and
+ * until this existed the only way to tell a room was its WebSocket, so the games
+ * already in progress carried on saying nothing until each was opened again.
+ *
+ * `keyHash` is asserted rather than proved, exactly as it is in `hello`: the
+ * relay has never held a key it could check one against.
+ */
+export async function registerGamePush(
+  gameId: string,
+  keyHash: string,
+  subscription: PushSubscriptionJson | null,
+  endpoint?: string,
+): Promise<void> {
+  await unwrap(await put(`/api/game/${gameId}/push`, { keyHash, subscription, endpoint }));
 }
 
 /** Opens the game socket. Same origin as the app, so no CORS and no cookies. */
