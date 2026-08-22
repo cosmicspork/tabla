@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/cosmicspork/tabla/compare/v0.5.0...v0.6.0) (2026-08-22)
+
+
+### Features
+
+* **app:** tell the tiles being placed from the ones that just landed ([#32](https://github.com/cosmicspork/tabla/issues/32)) ([f0c0c1d](https://github.com/cosmicspork/tabla/commit/f0c0c1dc82e68383a3b4dcd4f3740055f8de1b28))
+
+
+### Bug Fixes
+
+* **app:** two ways the board went dead under the player ([#30](https://github.com/cosmicspork/tabla/issues/30)) ([2334c8d](https://github.com/cosmicspork/tabla/commit/2334c8d9c2fd91891d04999e59d4529599201712))
+* notifications on a relay that has never had push keys, and three ways a turn went unannounced ([#33](https://github.com/cosmicspork/tabla/issues/33)) ([7b5556f](https://github.com/cosmicspork/tabla/commit/7b5556f55036704f521d897e3802742cb87a7f40))
+
 ## [0.5.0](https://github.com/cosmicspork/tabla/compare/v0.4.1...v0.5.0) (2026-08-22)
 
 
