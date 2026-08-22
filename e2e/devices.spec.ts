@@ -9,7 +9,14 @@
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 
-import { introduce, inviteLink, onTurn, startGame } from './helpers.ts';
+import {
+  gameWhereMoverCanSpell,
+  introduce,
+  inviteLink,
+  onTurn,
+  playWord,
+  startGame,
+} from './helpers.ts';
 
 /** Sets up a played game between two people, and returns the initiator's page. */
 async function playedGame(browser: Browser) {
@@ -236,4 +243,47 @@ test('a move being built on one device locks the board on the other', async ({ b
   await one.close();
   await two.close();
   await three.close();
+});
+
+/**
+ * The other half of that claim: the device that made it.
+ *
+ * The relay hands whatever claim it is holding to a socket that has just said
+ * hello, which is how a device joining late finds out that another is already
+ * mid-move. It cannot tell one of this person's devices from another — the
+ * body is sealed, and only the devices can read it — so a device that
+ * reconnects while its own claim is still standing is handed that claim back.
+ * Believing it locked the board against the player in front of it: their own
+ * tiles out of reach, and nothing but leaving the screen and coming back to
+ * clear it.
+ *
+ * One device here, and no link: this is a game with itself.
+ */
+test('a device is not locked out by its own claim on the turn', async ({ browser }) => {
+  const { one, two, mover, other, indices } = await gameWhereMoverCanSpell(browser, true);
+
+  // A tile down is what claims the turn at the relay, for two minutes.
+  await mover.locator('.rack .tile').nth(indices[0]).click();
+  await mover.locator('[data-cell="112"]').click();
+  await expect(mover.locator('.square.staged')).toHaveCount(1);
+
+  // And then the socket goes without the claim being given back. A reload does
+  // it here; in life it is a pocket, a tunnel, or iOS taking the app away. The
+  // relay keeps the claim through all of them — a claim is meant to outlive a
+  // dropped connection, or it would be no use to the device that made it.
+  await mover.reload();
+  await expect(mover.locator('[data-rack]')).toHaveAttribute('data-rack', /^.{7}$/, {
+    timeout: 30_000,
+  });
+
+  // The board is the player's again on the other side of that, and stays that
+  // way: playing a whole word is what proves the claim was handed back and
+  // recognised, because every part of it needs a board that takes taps.
+  await expect(mover.locator('[data-cell="112"]')).toBeEnabled();
+  await playWord(mover, indices);
+  await expect(other.locator('.square.filled')).toHaveCount(indices.length, { timeout: 30_000 });
+  await expect(mover.getByTestId('status')).not.toContainText(/mid-move on/);
+
+  await one.close();
+  await two.close();
 });
