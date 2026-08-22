@@ -121,8 +121,7 @@
 
   {#if opponent}
     <p class="muted note">
-      {opponent.name} will find this waiting the next time they open tabla. Nothing is sent to anybody:
-      it is left where only the two of you can look, and the relay cannot tell whose mailbox it is.
+      {opponent.name} will find this waiting the next time they open tabla. Nothing is sent to anybody.
     </p>
   {/if}
 </div>
