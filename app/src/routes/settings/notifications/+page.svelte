@@ -72,9 +72,8 @@
     <div>
       <h2>When it is your turn</h2>
       <p class="muted">
-        A notification says only that your opponent has played — never what. The relay could not
-        include more if it tried: it has never been able to read a move. Each device chooses for
-        itself, and playing a move anywhere clears the nudge everywhere.
+        A notification says only that your opponent has played, never what. Each device chooses for
+        itself.
       </p>
     </div>
 
@@ -96,8 +95,7 @@
       </div>
     {:else if availability === 'needs-install'}
       <p class="muted" data-testid="push-state">
-        On iPhone and iPad, notifications work only once an app has been installed to the Home
-        Screen. It takes three taps and nothing else changes.
+        On iPhone and iPad, notifications work only once an app has been added to the Home Screen.
       </p>
       <ol>
         <li>Tap the Share button in Safari's toolbar.</li>
@@ -112,27 +110,17 @@
       </p>
     {:else if availability === 'relay-unconfigured'}
       <p class="muted" data-testid="push-state">
-        This relay has no push keys set, so it cannot send a notification to anybody — not to you,
-        not to the person you are playing, not on any device. Nothing on this page will work until
-        whoever runs it sets them. Games are otherwise unaffected; you just have to come and look.
+        This relay has no push keys set, so it can send nothing to anybody — on any device, to
+        either player — until whoever runs it adds them.
       </p>
     {:else if availability === 'unsupported'}
       <p class="muted" data-testid="push-state">
-        This browser cannot receive them. Games work exactly the same either way — you just have to
-        come and look.
+        This browser cannot receive them. Games work the same either way — you just have to come and
+        look.
       </p>
     {:else}
       <p class="muted" data-testid="push-state">Checking…</p>
     {/if}
-  </section>
-
-  <section class="card">
-    <h2>There is no history to keep</h2>
-    <p class="muted">
-      Every notification carries the same thing — that something moved — so a list of them would say
-      no more than the game list already does, and the game list is up to date. That is why there is
-      not one.
-    </p>
   </section>
 </div>
 

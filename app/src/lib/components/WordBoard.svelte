@@ -9,7 +9,7 @@
     locked = false,
   }: {
     board: BoardState;
-    onplay: (move: unknown) => void | Promise<boolean | void>;
+    onplay: (move: unknown) => void | Promise<boolean | string | void>;
     onresign?: () => void;
     onstage?: (staged: boolean) => void;
     locked?: boolean;
@@ -39,6 +39,16 @@
     board.view.lastPlay as { by: number; words: string[]; cells: number[]; score: number } | null,
   );
   const audit = $derived(board.view.audit as { ok: boolean[]; notes: (string | null)[] } | null);
+
+  /**
+   * Which squares the last play put down, and whether it was theirs.
+   *
+   * Both go into how the square is drawn. Whose it was is worth carrying: the
+   * tiles that appeared while you were away are the first thing you look for
+   * when you open a game, and your own are only a reminder of what you did.
+   */
+  const freshCells = $derived(new Set(lastPlay?.cells ?? []));
+  const freshTheirs = $derived(lastPlay ? lastPlay.by !== you : false);
 
   const rackCommitment = $derived(board.view.rackCommitment as number[] | null);
   /**
@@ -70,6 +80,18 @@
   let exchanging = $state(false);
   let discards = $state<Set<number>>(new Set());
   let busy = $state(false);
+
+  /**
+   * Why the rules would not take the last play, if they would not.
+   *
+   * It stands until the placement changes rather than fading on a timer,
+   * because the answer to "that is not a word" is to move a tile, and a
+   * message that leaves on its own takes the reason with it. It is shown here
+   * rather than by the page for the same reason it is not dismissed for you:
+   * on a phone the top of the page is a board's height above the tiles being
+   * argued about, and a player pressing Play is looking at the tiles.
+   */
+  let refusal = $state<string | null>(null);
 
   const usedRackTiles = $derived(new Set(pending.values()));
 
@@ -123,6 +145,7 @@
       blankLetters.delete(cell);
       pending = new Map(pending);
       blankLetters = new Map(blankLetters);
+      refusal = null;
       return;
     }
 
@@ -130,6 +153,7 @@
 
     pending.set(cell, held);
     pending = new Map(pending);
+    refusal = null;
     if (rack[held] === '?') assigning = cell;
     held = null;
   }
@@ -151,6 +175,7 @@
     blankLetters.set(assigning, letter);
     blankLetters = new Map(blankLetters);
     assigning = null;
+    refusal = null;
   }
 
   function recall() {
@@ -158,6 +183,7 @@
     blankLetters = new Map();
     held = null;
     assigning = null;
+    refusal = null;
   }
 
   /** Turns the staged tiles into the placements the rules expect. */
@@ -181,13 +207,19 @@
    * The board is only cleared if the move was taken. Now that words are checked
    * as they are played, a refusal is something a player meets in normal play,
    * and sweeping their tiles back to the rack would make them lay the whole word
-   * out again to change one letter.
+   * out again to change one letter. What the rules said comes back with the
+   * refusal, because "PXQ is not in the word list" is something a player can
+   * act on and a greyed-out button is not.
    */
   async function submit(action: unknown) {
     if (busy) return;
     busy = true;
     try {
-      if ((await onplay(action)) === false) return;
+      const result = await onplay(action);
+      if (result === false || typeof result === 'string') {
+        refusal = typeof result === 'string' ? result : 'The rules would not take that move.';
+        return;
+      }
       recall();
       exchanging = false;
       discards = new Set();
@@ -247,6 +279,18 @@
   });
 
   const canPlay = $derived(yourTurn && phase === 'play' && pending.size > 0 && assigning === null);
+
+  /**
+   * What a square is, beyond where it is.
+   *
+   * The corner flag and the dashed ring are the same distinction drawn in
+   * colour; a label is how it reaches someone who is not looking at either.
+   */
+  function squareState(cell: number): string {
+    if (pending.has(cell)) return refusal ? ', placed this turn, refused' : ', placed this turn';
+    if (!freshCells.has(cell)) return '';
+    return freshTheirs ? ', from their last play' : ', from your last play';
+  }
 </script>
 
 <div class="letras">
@@ -267,11 +311,13 @@
         class="square p{premiums[cell]}"
         class:filled={letter !== ''}
         class:staged={pending.has(cell)}
-        class:fresh={lastPlay?.cells?.includes(cell)}
+        class:refused={refusal !== null && pending.has(cell)}
+        class:fresh={freshCells.has(cell)}
+        class:theirs={freshTheirs && freshCells.has(cell)}
         class:blank={isBlank(cell)}
         onclick={() => tapCell(cell)}
         disabled={!yourTurn || locked || phase !== 'play'}
-        aria-label={`row ${Math.floor(cell / SIZE) + 1} column ${(cell % SIZE) + 1}`}
+        aria-label={`row ${Math.floor(cell / SIZE) + 1} column ${(cell % SIZE) + 1}${squareState(cell)}`}
         data-cell={cell}
       >
         {#if letter}
@@ -308,6 +354,10 @@
       </button>
     {/each}
   </div>
+
+  {#if refusal}
+    <p class="notice warn refusal" role="alert" data-testid="refusal">{refusal}</p>
+  {/if}
 
   {#if exchanging}
     <div class="actions">
@@ -352,6 +402,7 @@
 
   {#if lastPlay}
     <p class="muted last">
+      <span class="key" class:theirs={freshTheirs} aria-hidden="true"></span>
       {lastPlay.by === you ? 'You played' : 'They played'}
       {lastPlay.words.join(', ')} for {lastPlay.score}.
       {#if canChallenge}
@@ -465,14 +516,55 @@
     font-weight: 600;
   }
 
+  /* Two things on this board are worth pointing at, and they are not the same
+   * thing: the tiles you are putting down now, which you can still pick back
+   * up, and the tiles that landed on the last turn, which you cannot. Both
+   * were a green ring, so the board said "look here" twice and meant something
+   * different each time — and on a fifteen-square grid the only way to tell
+   * which was which was to remember what you had just touched.
+   *
+   * So they are drawn in different languages rather than different greens.
+   * Staged tiles are dashed and lifted: provisional, and yours to move. The
+   * last play is settled, so it is marked rather than ringed — a corner flag
+   * and a wash of colour, which reads at a glance and does not depend on
+   * telling one hue from another. */
   .square.staged {
-    background: #f5e9cd;
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
+    background: #f7eed6;
+    outline: 2px dashed var(--accent);
+    outline-offset: -3px;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+    z-index: 1;
   }
 
   .square.fresh {
-    box-shadow: inset 0 0 0 2px var(--accent);
+    background: color-mix(in srgb, #2b2118 7%, #e8d7b0);
+  }
+
+  .square.fresh::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    border-top: 0.75em solid color-mix(in srgb, #2b2118 40%, transparent);
+    border-right: 0.75em solid transparent;
+  }
+
+  /* Their tiles are the ones you open the game to find, so theirs is the
+   * louder of the two marks and yours is only a reminder of what you did. */
+  .square.fresh.theirs {
+    background: color-mix(in srgb, #a3402f 15%, #e8d7b0);
+  }
+
+  .square.fresh.theirs::before {
+    border-top-color: #a3402f;
+  }
+
+  /* A refused play keeps its tiles, because they are what is about to be
+   * fixed. They stop looking like a move waiting to be made and start looking
+   * like the thing the message is about. */
+  .square.refused {
+    background: #f4dcd4;
+    outline: 2px dashed #a3402f;
   }
 
   .square.blank .letter {
@@ -574,5 +666,47 @@
   .honour {
     font-size: 0.85rem;
     margin: 0;
+  }
+
+  /* The same flag the squares carry, so the sentence and the tiles it is
+   * about are visibly one thing. */
+  .last .key {
+    display: inline-block;
+    width: 0.7em;
+    height: 0.7em;
+    margin-right: 0.15em;
+    background: color-mix(in srgb, #2b2118 45%, #e8d7b0);
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+  }
+
+  .last .key.theirs {
+    background: #a3402f;
+  }
+
+  /* Said where the move was made rather than at the top of a page the board
+   * has pushed off the screen, and not on a timer: it goes when the placement
+   * it is about changes. */
+  .refusal {
+    margin: 0;
+    animation: nudge 0.3s ease-in-out;
+  }
+
+  @keyframes nudge {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    30% {
+      transform: translateX(-3px);
+    }
+    70% {
+      transform: translateX(3px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .refusal {
+      animation: none;
+    }
   }
 </style>

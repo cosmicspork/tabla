@@ -78,8 +78,8 @@
   {:else if phase === 'taken'}
     <StatusBanner text="Linked." />
     <p class="muted">
-      Your other device has everything and is catching up on the games. It will appear on this
-      device's list once it says hello.
+      Your other device has everything and is catching up. It will appear in the list once it says
+      hello.
     </p>
     <a class="primary start" href="/settings/devices">Back to devices</a>
   {:else if phase === 'gone'}
@@ -112,10 +112,7 @@
       <button onclick={cancel}>Cancel</button>
     </div>
 
-    <p class="muted small">
-      This works once and then expires. The words are the key — the relay only ever holds the locked
-      box.
-    </p>
+    <p class="muted small">The words are the key. This link works once, then expires.</p>
   {/if}
 </div>
 

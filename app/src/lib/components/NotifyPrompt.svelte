@@ -51,10 +51,7 @@
   <div class="card stack">
     <div>
       <h2>Get told when it is your turn</h2>
-      <p class="muted">
-        Notifications say only that your opponent has played — never what they played. The relay
-        could not include anything more if it tried.
-      </p>
+      <p class="muted">Notifications say only that your opponent has played, never what.</p>
     </div>
     <div>
       <button class="primary" onclick={turnOn} disabled={busy}>
@@ -67,8 +64,7 @@
     <div>
       <h2>Add tabla to your Home Screen</h2>
       <p class="muted">
-        On iPhone and iPad, notifications only work once an app has been installed. It takes three
-        taps and the app keeps working exactly as it does now.
+        On iPhone and iPad, notifications work only once an app has been added to the Home Screen.
       </p>
     </div>
     <ol>

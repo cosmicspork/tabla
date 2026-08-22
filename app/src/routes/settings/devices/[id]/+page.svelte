@@ -65,7 +65,7 @@
         <span class="muted">Name</span>
         <input bind:value={name} maxlength={MAX_NAME_LENGTH} data-testid="device-name" />
       </label>
-      <p class="muted small">Only you see this. It is how you tell your devices apart here.</p>
+      <p class="muted small">Only you see this.</p>
       <div class="row">
         <button onclick={save}>Save name</button>
         {#if saved}<span class="muted" data-testid="device-saved">Saved.</span>{/if}
@@ -75,8 +75,8 @@
     <section class="card stack">
       <h2>Remove this device</h2>
       <p class="muted">
-        It stops being able to play your games from the next move on. Your games, the people you
-        play, and your fingerprint stay exactly as they are on your other devices.
+        It stops being able to play from the next move on, but keeps what it already downloaded. If
+        it was stolen rather than mislaid, start again with a new identity instead.
       </p>
       <div>
         <button class="danger" onclick={remove} disabled={busy} data-testid="remove-device">

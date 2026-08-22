@@ -46,9 +46,8 @@
   <button onclick={startFresh} disabled={busy}>Start fresh as someone new</button>
 
   <p class="muted small">
-    Removing a device asks it to stop, which is what has happened here. It cannot take back what
-    this device already downloaded — if it was stolen rather than mislaid, the answer is a new
-    identity, not this screen. Removed by {by.slice(0, 6)}…
+    Removed by {by.slice(0, 6)}… This device keeps whatever it already downloaded, so if it was
+    stolen rather than mislaid, start again with a new identity.
   </p>
 </div>
 

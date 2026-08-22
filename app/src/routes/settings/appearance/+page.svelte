@@ -28,7 +28,7 @@
   <div class="setting">
     <span class="label">
       Theme
-      <small>System follows your device, and changes with it</small>
+      <small>System follows your device</small>
     </span>
   </div>
   <div class="segmented" role="group" aria-label="Theme">

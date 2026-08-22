@@ -915,7 +915,11 @@ opponent's runs the same check while replaying. Both hold the identical list —
 pinned by hash in the invite, verified against those bytes before the rules see
 them — so they cannot reach different answers, which is the property that makes
 checking safe here at all. The refusal names the offending word, because a play
-can make several and only one may be the problem.
+can make several and only one may be the problem, and the board says so beside
+the tiles rather than the page saying it above them: a fifteen-square grid is
+taller than a phone screen, so a message at the top of the page is one the
+player who pressed Play never sees. It stands until the placement changes,
+because the answer to it is to move a tile.
 
 **Challenges, in versions 1 and 2.** A play was legal the moment it was
 geometrically sound; whether it was a word was a question the opponent had to

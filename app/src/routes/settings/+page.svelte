@@ -77,7 +77,7 @@
 
   const peopleSummary = $derived(
     contacts.length === 0
-      ? 'Nobody yet — they are added after a game'
+      ? 'Nobody yet'
       : `${contacts.slice(0, 3).join(', ')}${contacts.length > 3 ? `, and ${contacts.length - 3} more` : ''}`,
   );
 

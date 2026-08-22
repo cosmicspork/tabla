@@ -59,10 +59,7 @@
 {#if contacts.length === 0}
   <div class="card">
     <h2>Nobody yet</h2>
-    <p class="muted">
-      People are added here the first time you finish a handshake with them, which happens as soon
-      as someone opens one of your invites.
-    </p>
+    <p class="muted">People are added here as soon as someone opens one of your invites.</p>
   </div>
 {:else}
   <ul class="stack">

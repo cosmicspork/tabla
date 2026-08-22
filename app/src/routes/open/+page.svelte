@@ -69,11 +69,7 @@
 
 <div class="stack">
   <!-- No heading of its own: the header carries the only `h1` on a screen. -->
-  <p class="muted">
-    Paste an invite link, or the six words from your other device. Links open in your browser rather
-    than here — on iPhone and iPad there is no way for them not to — and this is how one gets
-    across.
-  </p>
+  <p class="muted">Paste an invite link, or the six words from your other device.</p>
 
   {#if failure}
     <p class="notice warn">{failure}</p>
