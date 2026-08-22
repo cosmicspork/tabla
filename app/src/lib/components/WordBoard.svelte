@@ -64,9 +64,16 @@
   let pending = $state<Map<number, number>>(new Map());
   /** Which rack tile is picked up, as an index into the rack string. */
   let held = $state<number | null>(null);
-  /** A blank waiting to be told what it stands for. */
+  /**
+   * The cell holding a blank that has not been told what it stands for.
+   *
+   * A move cannot be played while this is set, so it has to be impossible to
+   * leave behind: every path that takes the blank off the board clears it too,
+   * and the question itself is asked in a modal that cannot be scrolled past.
+   */
   let assigning = $state<number | null>(null);
   let blankLetters = $state<Map<number, string>>(new Map());
+  let chooser = $state<HTMLDialogElement | null>(null);
   let exchanging = $state(false);
   let discards = $state<Set<number>>(new Set());
   let busy = $state(false);
@@ -115,7 +122,7 @@
   }
 
   function tapCell(cell: number) {
-    if (!yourTurn || locked || phase !== 'play') return;
+    if (!yourTurn || locked || phase !== 'play' || assigning !== null) return;
 
     // Tapping a tile you just put down takes it back.
     if (pending.has(cell)) {
@@ -135,7 +142,7 @@
   }
 
   function tapRack(index: number) {
-    if (!yourTurn) return;
+    if (!yourTurn || assigning !== null) return;
 
     if (exchanging) {
       if (discards.has(index)) discards.delete(index);
@@ -153,6 +160,39 @@
     assigning = null;
   }
 
+  /**
+   * Changes your mind about the blank, and puts it back on the rack.
+   *
+   * There has to be a way out of the question: a blank with no letter is not a
+   * move, so a chooser that could only be answered would be a corner with
+   * nothing in it but Recall. Escape and the backdrop come here too.
+   */
+  function putBlankBack() {
+    if (assigning === null) return;
+    pending.delete(assigning);
+    pending = new Map(pending);
+    assigning = null;
+  }
+
+  /**
+   * Opens and closes the chooser to follow `assigning`.
+   *
+   * `showModal` rather than an `{#if}` block: it puts the question in the top
+   * layer, where the length of the board cannot push it under the fold, and it
+   * takes the taps that would otherwise land on tiles behind it. Both were the
+   * bug — the question went unseen, the board still moved under it, and Play
+   * refused a move it would not explain.
+   */
+  $effect(() => {
+    const dialog = chooser;
+    if (!dialog) return;
+    if (assigning !== null) {
+      if (!dialog.open) dialog.showModal();
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  });
+
   function recall() {
     pending = new Map();
     blankLetters = new Map();
@@ -169,6 +209,14 @@
       tile: rack[index] === '?' ? 0 : rack.charCodeAt(index) - 96,
       blankAs: rack[index] === '?' ? (blankLetters.get(cell) ?? 'e').charCodeAt(0) - 96 : null,
     }));
+  }
+
+  /** A staged blank that still has no letter, if one slipped through. */
+  function undecidedBlank(): number | null {
+    for (const [cell, index] of pending) {
+      if (rack[index] === '?' && !blankLetters.has(cell)) return cell;
+    }
+    return null;
   }
 
   /**
@@ -198,6 +246,16 @@
 
   function play() {
     if (pending.size === 0 || assigning !== null) return;
+
+    // Rather than send a letter nobody chose. `placements` falls back to an `e`
+    // so it always has something to hand the rules, and playing that silently
+    // would be worse than asking again.
+    const undecided = undecidedBlank();
+    if (undecided !== null) {
+      assigning = undecided;
+      return;
+    }
+
     void submit({ place: { placements: placements() } });
   }
 
@@ -282,16 +340,23 @@
     {/each}
   </div>
 
-  {#if assigning !== null}
-    <div class="card chooser">
-      <p>What does the blank stand for?</p>
-      <div class="letters">
-        {#each 'abcdefghijklmnopqrstuvwxyz'.split('') as letter (letter)}
-          <button onclick={() => chooseBlank(letter)}>{letter}</button>
-        {/each}
-      </div>
+  <!-- Clicking the backdrop is a click on the dialog itself, and means the
+       same as Escape: put the blank back and carry on. -->
+  <dialog
+    class="card chooser"
+    bind:this={chooser}
+    aria-labelledby="blank-question"
+    onclose={putBlankBack}
+    onclick={(event) => event.target === chooser && putBlankBack()}
+  >
+    <p id="blank-question">What does the blank stand for?</p>
+    <div class="letters">
+      {#each 'abcdefghijklmnopqrstuvwxyz'.split('') as letter (letter)}
+        <button onclick={() => chooseBlank(letter)}>{letter}</button>
+      {/each}
     </div>
-  {/if}
+    <button class="back" onclick={putBlankBack}>Put it back</button>
+  </dialog>
 
   <div class="rack" data-rack={rack}>
     {#each rack.split('') as tile, index (index)}
@@ -559,15 +624,49 @@
     border-color: tomato;
   }
 
+  /* The top layer places it, so this only has to make it look like the rest of
+     the app: a dialog draws its own border and takes its colours from the
+     browser, which in dark mode means black text on a dark card. */
+  .chooser {
+    margin: auto;
+    max-width: min(24rem, calc(100vw - 2rem));
+    color: var(--fg);
+    gap: 0.75rem;
+  }
+
+  /* Only when it is open. A bare `display` here would beat the browser's own
+     `dialog:not([open]) { display: none }`, and the question would sit under
+     the board being asked all game. */
+  .chooser[open] {
+    display: grid;
+  }
+
+  .chooser::backdrop {
+    background: rgb(0 0 0 / 0.45);
+  }
+
+  .chooser p {
+    margin: 0;
+  }
+
   .chooser .letters {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
+    justify-content: center;
   }
 
   .chooser .letters button {
     width: 2rem;
     padding: 0.25rem;
+  }
+
+  /* Quieter than the letters, but still plainly a button: it is the way out of
+     a question that must be answered, so it cannot read as a caption. */
+  .chooser .back {
+    justify-self: start;
+    color: var(--fg-muted);
+    padding: 0.35rem 0.7rem;
   }
 
   .last,

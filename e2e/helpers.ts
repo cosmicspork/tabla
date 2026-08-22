@@ -190,9 +190,11 @@ export async function playWord(page: Page, indices: number[]) {
     await page.locator('.rack .tile').nth(index).click();
     await page.locator(`[data-cell="${7 * 15 + startCol + offset}"]`).click();
 
-    // A blank asks what it stands for; `e` will do.
-    const chooser = page.locator('.chooser');
-    if (await chooser.isVisible()) await chooser.getByRole('button', { name: 'e' }).click();
+    // A blank asks what it stands for, in a modal that has to be answered
+    // before anything else on the board will take a tap; `e` will do.
+    const chooser = page.locator('dialog.chooser[open]');
+    if (await chooser.isVisible())
+      await chooser.getByRole('button', { name: 'e', exact: true }).click();
   }
 
   await page.getByRole('button', { name: 'Play' }).click();
