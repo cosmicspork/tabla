@@ -1,10 +1,11 @@
 /**
  * Knowing whether the other player is sitting there.
  *
- * The relay has always known which participants hold a live socket — it uses
- * that to decide whether a push is worth sending. Presence is that same fact,
- * said out loud. Nothing about a game depends on it; it exists so a person
- * deciding whether to wait for a reply can tell.
+ * The relay has always known which participants hold a live socket. Presence is
+ * that fact said out loud. Nothing about a game depends on it; it exists so a
+ * person deciding whether to wait for a reply can tell. It is deliberately
+ * looser than what a notification is decided on — that asks for a heartbeat
+ * too, because an open socket can belong to a phone frozen on its lock screen.
  */
 import { expect, test } from '@playwright/test';
 

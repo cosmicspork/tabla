@@ -11,6 +11,7 @@ import {
   cancelInviteRequestSchema,
   cancelLinkRequestSchema,
   createLinkRequestSchema,
+  gamePushRequestSchema,
   mailboxPushRequestSchema,
   pollMailboxRequestSchema,
   postMailboxRequestSchema,
@@ -107,6 +108,15 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
       return json({ ok: true });
     }
     return json({ code: 'method_not_allowed' }, 405);
+  }
+
+  // Notifications are switched on in settings, for every game at once, and a
+  // room used to be reachable only down its own WebSocket — so the games
+  // already in progress went on hearing nothing. This is that door.
+  const gamePushMatch = path.match(/^\/api\/game\/([A-Za-z0-9_-]{22})\/push$/);
+  if (gamePushMatch) {
+    if (request.method !== 'PUT') return json({ code: 'method_not_allowed' }, 405);
+    return registerGamePush(request, env, gamePushMatch[1]);
   }
 
   const wsMatch = path.match(/^\/ws\/game\/([A-Za-z0-9_-]{22})$/);
@@ -323,6 +333,25 @@ async function registerMailboxPush(
   const stub = mailboxFor(env, mailboxId);
   await stub.remember(mailboxId);
   await stub.setPush(parsed.data.subscription);
+
+  return json({ ok: true });
+}
+
+/**
+ * Registers, or retires, one device's push subscription for one game.
+ *
+ * The caller asserts its own key hash, which proves nothing — but `hello` on
+ * the socket proves nothing either, and never has: the relay has never held a
+ * key it could check one against. Anyone who knows a game id can already reach
+ * its room, and what this adds to that is the ability to be told, in a payload
+ * that says only "something happened", about a game they already knew of.
+ */
+async function registerGamePush(request: Request, env: Env, gameId: string): Promise<Response> {
+  const parsed = gamePushRequestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return json({ code: ErrorCode.BadMessage }, 400);
+
+  const { keyHash, subscription, endpoint } = parsed.data;
+  await roomFor(env, gameId).setPushSubscription(keyHash, subscription, Date.now(), endpoint);
 
   return json({ ok: true });
 }

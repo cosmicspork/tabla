@@ -100,3 +100,24 @@ export const HOLD_MAX_MS = 3 * 60 * 1000;
 export const TURN_REMINDER_MS = 24 * 60 * 60 * 1000;
 /** Ciphertext is evicted after this much inactivity, leaving only a tombstone. */
 export const RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * How often a client that is actually on screen says so, and how long the relay
+ * goes on believing it.
+ *
+ * The relay used to read "this socket is open" as "this person is looking at
+ * the board", and skip the notification on that basis. Under the Hibernation
+ * API a socket outlives the page by a long way: an installed app frozen when a
+ * phone locks, a laptop lid closed mid-game, a background tab the browser
+ * suspended — every one of them stays listed, and every one of them meant a
+ * turn that was never announced. Nothing distinguishes those from an attentive
+ * player except being told, so the client says it on an interval and the relay
+ * stops believing it after a couple of missed beats.
+ *
+ * Only while the page is visible: a hidden tab is throttled to roughly a beat a
+ * minute anyway, and a person who cannot see the board is exactly who the
+ * notification is for.
+ */
+export const HEARTBEAT_MS = 25 * 1000;
+/** Silence longer than this and a socket no longer counts as someone watching. */
+export const PRESENCE_STALE_MS = 70 * 1000;

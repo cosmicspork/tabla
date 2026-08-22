@@ -7,7 +7,12 @@
    */
   import { isIos } from '$lib/lifecycle.ts';
   import { registerInboxPush } from '$lib/mailbox.ts';
-  import { enablePush, pushAvailability, type PushAvailability } from '$lib/push.ts';
+  import {
+    enablePush,
+    pushAvailability,
+    registerGamesForPush,
+    type PushAvailability,
+  } from '$lib/push.ts';
   import type { PushSubscriptionJson } from '@tabla/shared';
 
   let { onsubscribe }: { onsubscribe: (subscription: PushSubscriptionJson) => void } = $props();
@@ -28,6 +33,10 @@
         // Turns are not the only thing worth being told about: an invitation
         // from someone you have played lands in a mailbox, not a game room.
         void registerInboxPush(subscription);
+        // And `onsubscribe` reaches only the game this was offered beside. Any
+        // others already under way have to be told too, or they stay silent
+        // until each is next opened.
+        void registerGamesForPush(subscription);
         availability = 'enabled';
       } else {
         availability = await pushAvailability();

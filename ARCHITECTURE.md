@@ -531,8 +531,42 @@ just played is exactly the leak this project exists to avoid.
 The relay sends one push when the opponent appends, and one reminder if a turn
 has gone unanswered for 24 hours. It does not nag beyond that: the reminder's
 due time is deleted as it fires, so waking again cannot re-send it. A push is
-skipped entirely when the opponent already has a live socket — they have the
-move already.
+skipped for a device that is watching that board right now — it has the move
+already, over its own socket.
+
+**Watching, not merely connected.** An open socket is not evidence of anyone
+looking at anything. Under the Hibernation API it outlives the page by as long
+as the connection survives, and an installed app frozen when a phone locks, a
+laptop lid closed mid-game and a background tab the browser suspended all keep
+theirs. Reading those as "they are looking at the board" is a turn nobody is
+ever told about, and it only happens in production: a test that closes its
+sockets and a browser open on a desk never look like that.
+
+So a client says it is watching, on an interval, and the relay stops believing
+it after a couple of missed beats (`HEARTBEAT_MS`, `PRESENCE_STALE_MS`). The
+beat is a `ping` frame answered by the Durable Object's auto-response, which the
+runtime sends without waking a hibernated object — so an open board costs
+nothing to keep believing. It is sent only while the page is visible: a hidden
+tab's timers are throttled to roughly a beat a minute anyway, and someone who
+cannot see the board is exactly who the notification is for. A client too old to
+beat has no timestamp and is treated as away, which errs towards a notification
+about a board someone was already looking at — the better of the two mistakes.
+
+The decision is per device, not per person. A socket carries the push endpoint
+its device registered, and only that endpoint is skipped; a laptop left open on
+a game is no reason for the phone in the same pocket to stay quiet. Because the
+relay errs towards sending, the taking-down belongs on the client: opening a
+board closes any notification tagged with that game.
+
+Subscriptions reach a room two ways: `push_sub` on the game's socket, and
+`PUT /api/game/<id>/push` for a game whose board is not open. The second exists
+because notifications are one decision, made in settings, about every game at
+once — and while the socket was the only door, turning them on left every game
+already in progress silent until its board happened to be opened again. Turning
+them off walks the same list, so a device whose owner said no stops being pushed
+to rather than lapsing when the push service eventually answers 410. The caller
+names its own key hash, which authorises nothing; neither does `hello`, and the
+relay has never held a key it could check either against.
 
 Subscriptions are stored **per endpoint**, not per participant, so a person with
 a phone and a laptop is told on both. They were per participant until devices
@@ -548,8 +582,9 @@ that silently fails is otherwise invisible: the person simply never hears about
 their turn.
 
 What automated tests can show is that the relay attempts a push to the right
-participant, that the body encrypts cleanly under RFC 8291, and that the reminder
-fires exactly once. Actual delivery runs through APNs and FCM and cannot be
+device, that a quiet socket does not silence one and a beating socket does, that
+the body encrypts cleanly under RFC 8291, and that the reminder fires exactly
+once. Actual delivery runs through APNs and FCM and cannot be
 exercised in CI, so it stays a manual check on a real device.
 
 iOS constraints shape the UX rather than being worked around:

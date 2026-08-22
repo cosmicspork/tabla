@@ -12,7 +12,12 @@
   import { GameSession, type BoardState } from '$lib/game-session.ts';
   import { cancelPendingGame, refreshPendingGame } from '$lib/games.ts';
   import { onShouldResync } from '$lib/lifecycle.ts';
-  import { clearRetiredEndpoint, currentSubscription, retiredEndpoint } from '$lib/push.ts';
+  import {
+    clearGameNotifications,
+    clearRetiredEndpoint,
+    currentSubscription,
+    retiredEndpoint,
+  } from '$lib/push.ts';
   import { installPlugin, installedState, InstallError } from '$lib/plugin/install.ts';
   import { pageTitle } from '$lib/page-title.svelte.ts';
   import { gameEntry, titleOf, type BoardProps } from '$lib/registry.ts';
@@ -45,6 +50,12 @@
   $effect(() => {
     const id = gameId;
     void start(id);
+
+    // Whatever nudge brought someone here — or was waiting when they arrived by
+    // another route — has said all it had to say now the board is in front of
+    // them. The relay errs towards sending one, because the alternative is
+    // silence about a real turn, so the taking-down belongs on this side.
+    void clearGameNotifications(id);
 
     // Sync when the app comes forward, when the network returns, and when a
     // push wakes us. iOS gives a web app no background execution, so these are

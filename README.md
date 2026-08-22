@@ -249,27 +249,42 @@ cannot be exercised in CI. To check the rest by hand:
 4. Have the other player move. The notification should say only that it is your
    turn — if it ever names a move, that is a bug worth reporting loudly.
 
+The one that only production can show you is a device that stopped running with
+its socket still open. It is the whole reason turns went unannounced:
+
+5. Open the game, lock the phone, and have the opponent move. The notification
+   should arrive within a minute or so of the screen going dark — the relay
+   waits out a couple of missed heartbeats before it stops believing anyone is
+   looking. Leave the board open and awake instead, and there should be no
+   notification at all: the move simply appears.
+6. Turn notifications on from **Settings › Notifications** rather than the
+   prompt beside a game, with a game already in progress and its board closed.
+   The next move in it should still be announced; that used to wait until the
+   board was next opened, which in practice meant never.
+
 Worth checking with two devices of your own, since subscriptions are stored per
 device and a bug there is invisible rather than loud:
 
-5. Link a second device and turn notifications on there too. A move by the
+7. Link a second device and turn notifications on there too. A move by the
    opponent should reach both.
-6. Play the move from either one. The notification should clear on both, since
+8. Leave the game open on one and locked on the other. The locked one should
+   still be told — one open board is no reason for the rest to stay quiet.
+9. Play the move from either one. The notification should clear on both, since
    they share a tag.
-7. Turn notifications off on one, open a game on it, and have the opponent move
-   again. Only the other device should be told.
+10. Turn notifications off on one and have the opponent move again. Only the
+    other device should be told, without the first needing a board opened on it.
 
 Links are worth the same treatment, and for the same reason — a simulated
 iPhone is still Chromium, which shares storage between a tab and an installed
 app where a real one does not:
 
-8. With tabla on the Home Screen, send yourself an invite link and tap it. It
-   opens Safari, which should ask whether you already play here rather than
-   join. Say you do, copy the link, and paste it into **Open a link someone sent
-   me** in the app. The game should open there, and only there.
-9. Answer the other way on a device with no tabla installed. It should join in
-   the tab, as it always has.
-10. Show the same invite's QR on another screen and scan it from inside the
+11. With tabla on the Home Screen, send yourself an invite link and tap it. It
+    opens Safari, which should ask whether you already play here rather than
+    join. Say you do, copy the link, and paste it into **Open a link someone
+    sent me** in the app. The game should open there, and only there.
+12. Answer the other way on a device with no tabla installed. It should join in
+    the tab, as it always has.
+13. Show the same invite's QR on another screen and scan it from inside the
     installed app instead. Safari should never appear. This is the one path
     automated tests can only approximate — they feed the scanner a canvas rather
     than a lens, and a simulated iPhone is Chromium, so the camera behaving in a

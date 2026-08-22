@@ -5,7 +5,7 @@
  * the board out as a plain view object the UI can render. Keeps Svelte out of
  * it entirely so the same logic can be exercised without a browser.
  */
-import { fromBase64Url, toBase64Url } from '@tabla/shared';
+import { HEARTBEAT_MS, fromBase64Url, toBase64Url } from '@tabla/shared';
 
 import { Deal, type DealDuty } from './deal.ts';
 import {
@@ -101,6 +101,14 @@ export class GameSession {
   /** The claim on this turn, if one of this person's other devices has it. */
   private heldBy: { device: string; until: number } | null = null;
   private holdTimer: ReturnType<typeof setInterval> | undefined;
+  private beatTimer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * What this device asked to be notified through, so a reconnection can say so
+   * again. The relay keeps it against the socket as well as the room, and a
+   * resync throws the old socket away — after which it would have gone back to
+   * treating this device as one that never asked.
+   */
+  private pushSubscription: PushSubscriptionJSON | null = null;
   private rolledBackNote: string | undefined;
   private lastError: string | null = null;
 
@@ -295,13 +303,47 @@ export class GameSession {
     });
 
     await this.engine.connect();
+
+    // Said again on every connection, not once per game: `resync` builds a new
+    // socket, and the relay's record of which device is watching lives on the
+    // socket it was told about.
+    if (this.pushSubscription) this.engine.subscribeToPush(this.pushSubscription as never);
+
+    this.startHeartbeat();
   }
 
   disconnect(): void {
     this.releaseHold();
+    this.stopHeartbeat();
     this.engine?.disconnect();
     this.engine = null;
     this.heldBy = null;
+  }
+
+  /**
+   * Tells the relay, while this board is on screen, that it still is.
+   *
+   * The relay reads silence as nobody looking and sends the notification. That
+   * is deliberate: a socket alone proves only that a connection was never torn
+   * down, and a phone frozen on the lock screen keeps one. Only while visible —
+   * a hidden tab's timers are throttled to about a beat a minute, and someone
+   * who cannot see the board is precisely who should be told.
+   */
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+
+    const beat = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      this.engine?.heartbeat();
+    };
+
+    beat();
+    this.beatTimer = setInterval(beat, HEARTBEAT_MS);
+  }
+
+  private stopHeartbeat(): void {
+    clearInterval(this.beatTimer);
+    this.beatTimer = undefined;
   }
 
   /**
@@ -761,11 +803,13 @@ export class GameSession {
 
   /** Registers this device for content-free pushes about this game. */
   subscribeToPush(subscription: PushSubscriptionJSON): void {
+    this.pushSubscription = subscription;
     this.engine?.subscribeToPush(subscription as never);
   }
 
   /** Retires one endpoint, for a device whose owner turned notifications off. */
   unsubscribeFromPush(endpoint: string): void {
+    if (this.pushSubscription?.endpoint === endpoint) this.pushSubscription = null;
     this.engine?.unsubscribeFromPush(endpoint);
   }
 

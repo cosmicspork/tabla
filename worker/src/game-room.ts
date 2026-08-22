@@ -15,7 +15,10 @@ import { DurableObject } from 'cloudflare:workers';
 
 import {
   ErrorCode,
+  HEARTBEAT_REQUEST,
+  HEARTBEAT_RESPONSE,
   MAX_ENTRY_BYTES,
+  PRESENCE_STALE_MS,
   PROTOCOL_VERSION,
   RETENTION_MS,
   TURN_REMINDER_MS,
@@ -66,11 +69,29 @@ interface SocketAttachment {
   gameId: string;
   keyHash: string | null;
   proto: number;
+  /**
+   * The push endpoint of the device on the other end, once it has registered
+   * one. This is what makes "they are looking at the board" a fact about a
+   * device rather than about a person: without it, a laptop left open on a game
+   * silenced the phone in the same pocket as the notification it wanted.
+   */
+  endpoint?: string | null;
+  /** When this socket was last heard from at all, as a fallback for the beat. */
+  lastSeen?: number;
 }
 
 export class GameRoomDO extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+
+    // The runtime answers a heartbeat itself, without waking this object, so a
+    // beat every `HEARTBEAT_MS` from every open board costs nothing at all —
+    // and `getWebSocketAutoResponseTimestamp` then says when each socket was
+    // last known to have a page behind it. That is the whole liveness signal:
+    // an open socket proves only that a connection was never torn down.
+    ctx.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair(HEARTBEAT_REQUEST, HEARTBEAT_RESPONSE),
+    );
 
     ctx.blockConcurrencyWhile(async () => {
       const sql = ctx.storage.sql;
@@ -270,7 +291,7 @@ export class GameRoomDO extends DurableObject<Env> {
     if (staged.length > 0) {
       this.touch(keyHash, now);
       await this.scheduleTurnReminder(now, keyHash);
-      await this.notifyOpponent(keyHash);
+      await this.pushToOpponents(keyHash);
     }
 
     const state = await this.state();
@@ -338,6 +359,12 @@ export class GameRoomDO extends DurableObject<Env> {
     const attachment = this.attachmentOf(ws);
     const now = Date.now();
 
+    // Anything at all from this socket proves someone is still behind it. The
+    // heartbeat is normally answered by the runtime and never arrives here, so
+    // this is a floor rather than the main signal — but it is the one that
+    // covers a client too old to beat while it is actually playing.
+    ws.serializeAttachment({ ...attachment, lastSeen: now });
+
     switch (message.data.t) {
       case 'hello':
         return this.onHello(ws, attachment, message.data, now);
@@ -347,6 +374,13 @@ export class GameRoomDO extends DurableObject<Env> {
         return this.onReq(ws, message.data.fromSeq);
       case 'push_sub':
         if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
+        // Remembered against the socket as well as the table, so a move can ask
+        // "is *this device* watching" rather than "is anyone of theirs".
+        ws.serializeAttachment({
+          ...attachment,
+          lastSeen: now,
+          endpoint: message.data.subscription?.endpoint ?? null,
+        });
         await this.setPushSubscription(
           attachment.keyHash,
           message.data.subscription,
@@ -360,6 +394,11 @@ export class GameRoomDO extends DurableObject<Env> {
       case 'release':
         if (!attachment.keyHash) return this.fail(ws, ErrorCode.BadMessage, 'say hello first');
         return this.onHold(ws, attachment.keyHash, null, 0);
+      case 'ping':
+        // Only reached if the auto-response did not match — the timestamp it
+        // would have set is missing, so the `lastSeen` written above is what
+        // keeps this socket counted as watched.
+        return this.send(ws, { t: 'pong' });
     }
   }
 
@@ -373,7 +412,9 @@ export class GameRoomDO extends DurableObject<Env> {
       return this.fail(ws, ErrorCode.ProtocolVersion, `relay speaks v${PROTOCOL_VERSION}`);
     }
 
-    ws.serializeAttachment({ ...attachment, keyHash: hello.keyHash });
+    // `lastSeen` too, since this write replaces the one made for this frame
+    // before the message was dispatched.
+    ws.serializeAttachment({ ...attachment, keyHash: hello.keyHash, lastSeen: now });
     this.touch(hello.keyHash, now);
 
     // The client compares this against its own tip and decides what to do:
@@ -521,17 +562,6 @@ export class GameRoomDO extends DurableObject<Env> {
   }
 
   /**
-   * Tells the opponent it is their turn, without telling them anything else.
-   *
-   * Skipped entirely when the opponent already has a live socket: they have the
-   * move already, and a notification would just be noise.
-   */
-  private async notifyOpponent(authorKeyHash: string): Promise<void> {
-    if (this.hasLiveSocket((keyHash) => keyHash !== null && keyHash !== authorKeyHash)) return;
-    await this.pushToOpponents(authorKeyHash);
-  }
-
-  /**
    * Counts delivery attempts and remembers the last result.
    *
    * A push that fails is invisible otherwise — the person simply never hears
@@ -542,10 +572,34 @@ export class GameRoomDO extends DurableObject<Env> {
     this.setMeta('lastPushOk', outcome.ok ? '1' : '0');
   }
 
-  private hasLiveSocket(match: (keyHash: string | null) => boolean): boolean {
-    return this.ctx
-      .getWebSockets()
-      .some((socket) => match(this.attachmentOf(socket).keyHash));
+  /**
+   * The push endpoints of devices that are demonstrably on screen right now.
+   *
+   * A socket is not evidence. Under the Hibernation API it outlives the page by
+   * as long as the connection survives, and a phone that locked mid-game, a
+   * closed laptop lid and a suspended background tab all keep theirs — which is
+   * exactly how a turn went unannounced while the relay believed someone was
+   * looking straight at it. A beat within `PRESENCE_STALE_MS` is the evidence,
+   * because a frozen page cannot produce one.
+   *
+   * A client too old to beat has no timestamp and is treated as away. That errs
+   * towards a notification for a board someone was already looking at, which is
+   * the mistake worth making of the two.
+   */
+  private attentiveEndpoints(match: (keyHash: string | null) => boolean, now: number): Set<string> {
+    const attentive = new Set<string>();
+
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = this.attachmentOf(socket);
+      if (!match(attachment.keyHash)) continue;
+      if (!attachment.endpoint) continue;
+
+      const beat = this.ctx.getWebSocketAutoResponseTimestamp(socket)?.getTime() ?? 0;
+      const heard = Math.max(beat, attachment.lastSeen ?? 0);
+      if (now - heard < PRESENCE_STALE_MS) attentive.add(attachment.endpoint);
+    }
+
+    return attentive;
   }
 
   /** The single reminder sent when a turn has gone unanswered for a day. */
@@ -554,11 +608,29 @@ export class GameRoomDO extends DurableObject<Env> {
     if (lastAuthor) await this.pushToOpponents(lastAuthor);
   }
 
+  /**
+   * Tells every one of the opponent's devices that it is their turn, and
+   * nothing else about it.
+   *
+   * Skipped for a device that is watching this board right now: it has the move
+   * already, over its own socket, and a notification would be noise. Watching,
+   * not merely connected — see `attentiveEndpoints`. Decided per device rather
+   * than per person, because a laptop left open on a game is no reason for the
+   * phone in someone's pocket to stay quiet.
+   */
   private async pushToOpponents(authorKeyHash: string): Promise<void> {
     const gameId = this.meta('gameId');
     if (!gameId) return;
 
+    const now = Date.now();
+    const watching = this.attentiveEndpoints(
+      (keyHash) => keyHash !== null && keyHash !== authorKeyHash,
+      now,
+    );
+
     for (const subscription of this.opponentSubscriptions(authorKeyHash)) {
+      if (watching.has(subscription.endpoint)) continue;
+
       const outcome = await sendPush(this.env, subscription, { gameId });
       this.recordPushAttempt(outcome);
 

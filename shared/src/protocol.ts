@@ -115,8 +115,27 @@ export const clientMessageSchema = z.discriminatedUnion('t', [
     ttlMs: z.number().int().positive().max(HOLD_MAX_MS),
   }),
   z.object({ t: z.literal('release') }),
+  /**
+   * "I am still looking at this board."
+   *
+   * Answered by the room's auto-response, which the runtime sends without
+   * waking a hibernated object — so a beat every `HEARTBEAT_MS` costs nothing
+   * and is the only thing that tells an attentive player apart from a socket
+   * whose device was frozen with the page open. See `HEARTBEAT_REQUEST`.
+   */
+  z.object({ t: z.literal('ping') }),
 ]);
 export type ClientMessage = z.infer<typeof clientMessageSchema>;
+
+/**
+ * The two heartbeat frames, as the exact bytes on the wire.
+ *
+ * A Durable Object's auto-response matches the request string literally, so
+ * these cannot be produced by serialising an object and hoping the key order
+ * agrees. Both ends send and match these constants.
+ */
+export const HEARTBEAT_REQUEST = '{"t":"ping"}';
+export const HEARTBEAT_RESPONSE = '{"t":"pong"}';
 
 /** Relay to client. `tipSeq: -1` means the relay holds no log (evicted or fresh). */
 export const serverMessageSchema = z.discriminatedUnion('t', [
@@ -132,8 +151,9 @@ export const serverMessageSchema = z.discriminatedUnion('t', [
    * How many other participants hold a live socket on this room right now.
    *
    * This is liveness of an opaque key hash and nothing else — the relay has
-   * always known it (it suppresses push for a connected opponent), and saying
-   * so out loud reveals no more than the fan-out already does.
+   * always known it, and saying so out loud reveals no more than the fan-out
+   * already does. A looser fact than the one push is decided on: an open socket
+   * counts here, where a notification asks for a recent heartbeat as well.
    */
   z.object({ t: z.literal('presence'), others: z.number().int().nonnegative() }),
   /**
@@ -148,6 +168,8 @@ export const serverMessageSchema = z.discriminatedUnion('t', [
     until: z.number().int(),
   }),
   z.object({ t: z.literal('err'), code: z.string(), detail: z.string().optional() }),
+  /** The answer to a heartbeat. Carries nothing; arriving at all is the point. */
+  z.object({ t: z.literal('pong') }),
 ]);
 export type ServerMessage = z.infer<typeof serverMessageSchema>;
 
@@ -212,6 +234,27 @@ export const pollMailboxResponseSchema = z.object({
 
 export const mailboxPushRequestSchema = z.object({
   subscription: pushSubscriptionSchema,
+});
+
+/**
+ * Registering, or retiring, one device's push subscription for one game —
+ * without opening that game's socket.
+ *
+ * Turning notifications on is a settings decision about every game at once, and
+ * there was no way to say so: the only route to a room was its WebSocket, so a
+ * person who switched them on carried on hearing nothing about the games they
+ * already had until they happened to open each board again.
+ *
+ * The caller names its own `keyHash`, which authorises nothing — but nor does
+ * `hello`, and the relay has never been able to check either. Whoever holds a
+ * game id can already reach the room; all this adds is a second door onto what
+ * that door already opens.
+ */
+export const gamePushRequestSchema = z.object({
+  keyHash: b64url.length(43),
+  subscription: pushSubscriptionSchema.nullable(),
+  /** Only for retiring: by then the browser subscription is already gone. */
+  endpoint: z.string().optional(),
 });
 
 // ---------------------------------------------------------------------------
