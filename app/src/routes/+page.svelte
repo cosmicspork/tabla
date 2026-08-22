@@ -190,10 +190,7 @@
   {#if empty}
     <div class="card">
       <h2>Nothing here yet</h2>
-      <p class="muted">
-        Start a game and send someone the link. The link works once, and the key that unlocks it
-        travels in the part of the URL your browser never sends to a server.
-      </p>
+      <p class="muted">Start a game and send someone the link.</p>
     </div>
   {/if}
 

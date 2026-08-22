@@ -65,19 +65,7 @@
     Link a new device
   </a>
 
-  <p class="muted">
-    Every device plays as you, with your name and your fingerprint. Nobody you play sees more than
-    one person, and the relay cannot tell which of them is which.
-  </p>
-
-  <section class="card">
-    <h2>When a device is lost</h2>
-    <p class="muted">
-      Open it above and choose Remove. It stops being able to play your games from the next move on.
-      It keeps whatever it had already downloaded, so if it was stolen rather than mislaid, start
-      again with a new identity instead.
-    </p>
-  </section>
+  <p class="muted">Every device plays as you, with your name and your fingerprint.</p>
 </div>
 
 <style>
