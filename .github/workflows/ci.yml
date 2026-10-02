@@ -5,25 +5,57 @@ on:
     branches: [main]
   pull_request:
 
-# A second push to a PR makes the first run pointless; let it go.
+permissions:
+  contents: read
+
+# A newer push to a PR makes the older run pointless. Runs on main are never
+# cancelled, so every commit there gets a verdict.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # The PR title becomes the squash commit, and release-please reads only that:
+  # a title without a conventional-commit type lands as a subject it does not
+  # count, and the change is silently left out of the release.
+  title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@e32d7e603df1aa1ba07e981f2a23455dee596825 # v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            refactor
+            test
+            chore
+            build
+            ci
+            perf
+
   # Formatting, lints, and the per-game build matrix. The matrix matters more
   # than it looks: each downloadable game is a separate binary built with one
   # game selected, and a change that only compiles when everything is enabled
   # would not be caught by `cargo test` alone.
   rust:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
-      - uses: extractions/setup-just@v3
-      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
           workspaces: rust
       - run: just check-rust
       # --all-features so the dictionary builder, off by default because it must
@@ -34,20 +66,23 @@ jobs:
   # is built from. This job is also what proves the committed artifacts are
   # still the ones the signed manifest names.
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Rust (wasm32)
         run: |
           rustup toolchain install stable --profile minimal
           rustup target add wasm32-unknown-unknown
-      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
         with:
           version: v0.13.1
-      - uses: extractions/setup-just@v3
-      - uses: oven-sh/setup-bun@v2
-      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
           workspaces: rust
       - run: just install
       # Builds the WASM the type-checker and the tests both read.
@@ -56,7 +91,8 @@ jobs:
       - run: just test-ts
 
   e2e-shard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     # Split in two to halve the wall clock; a full run is long enough that a
     # red shard should not wait on a green one.
     #
@@ -72,18 +108,20 @@ jobs:
       matrix:
         shard: [1, 2]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install Rust (wasm32)
         run: |
           rustup toolchain install stable --profile minimal
           rustup target add wasm32-unknown-unknown
-      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
         with:
           version: v0.13.1
-      - uses: extractions/setup-just@v3
-      - uses: oven-sh/setup-bun@v2
-      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
           workspaces: rust
       - run: just install
       - name: Resolve installed Playwright version
@@ -91,7 +129,7 @@ jobs:
         working-directory: e2e
         run: echo "version=$(bunx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ steps.playwright-version.outputs.version }}
@@ -103,7 +141,7 @@ jobs:
       - run: just test-e2e --shard=${{ matrix.shard }}/2
       - name: Upload Playwright report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: playwright-report-${{ matrix.shard }}
           path: |
@@ -116,7 +154,8 @@ jobs:
   # ahead of time. This is the check that can be required: one name, green only
   # if every shard was.
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     needs: e2e-shard
     if: always()
     steps:
