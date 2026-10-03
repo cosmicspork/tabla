@@ -128,14 +128,30 @@ jobs:
         id: playwright-version
         working-directory: e2e
         run: echo "version=$(bunx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-      - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ steps.playwright-version.outputs.version }}
-      - name: Install Chromium
+      # --with-deps only on a miss: its apt step is at the mercy of the Ubuntu
+      # mirrors (svastha and hounddogreading have each lost several minutes to
+      # it), and on a hit the runner image already carries chromium's system
+      # libraries. The bare install is a near-instant no-op that heals a
+      # partial restore.
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: e2e
         run: bunx playwright install --with-deps chromium
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: e2e
+        run: bunx playwright install chromium
+      # Saved straight after the install rather than at the end of the job, so
+      # a failing shard still leaves the browsers cached for the next run.
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
       # Builds the app and serves it through the real Worker, so the service
       # worker, the plugin downloads and push all behave as they do in production.
       - run: just test-e2e --shard=${{ matrix.shard }}/2
