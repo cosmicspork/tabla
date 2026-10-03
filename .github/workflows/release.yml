@@ -21,27 +21,35 @@ jobs:
   # Opens and updates a release PR from the conventional-commit history. Merging
   # that PR cuts the tag and the GitHub release, and sets release_created.
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       release_created: ${{ steps.rp.outputs.release_created }}
       version: ${{ steps.rp.outputs.version }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         id: rp
         with:
+          # A PR opened with GITHUB_TOKEN gets no CI run until someone approves
+          # it by hand, and the release PR has required checks. This token opens
+          # it as a user instead. Without the secret it falls back to
+          # GITHUB_TOKEN and the old behaviour.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
       # release-please stamps the new version into the manifests it is told
       # about, but it cannot touch Cargo.lock — so the release PR would open
-      # with a stale lockfile and fail its own CI. This has to happen here,
-      # in this job: a workflow watching pushes to the release branch would
-      # never fire, because pushes made with GITHUB_TOKEN do not trigger one.
+      # with a stale lockfile and fail its own CI. It is refreshed here, in
+      # this job, so the release PR never sits stale between two workflows.
       - name: Check out the release PR branch
         if: steps.rp.outputs.prs_created == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ fromJson(steps.rp.outputs.pr).headBranchName }}
+          # Same token as release-please, so the lockfile push below re-runs CI
+          # on the commit the release PR will actually merge.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
 
       - name: Install Rust
         if: steps.rp.outputs.prs_created == 'true'
@@ -54,9 +62,8 @@ jobs:
         working-directory: rust
         run: cargo update --workspace
 
-      # Pushed as github-actions[bot] with GITHUB_TOKEN, like release-please's
-      # own commits, so this cannot loop: the push triggers no workflow, and a
-      # re-run finds a clean lockfile and skips the commit entirely.
+      # This cannot loop: the push goes to the release branch and this workflow
+      # runs only on main. A re-run finds a clean lockfile and skips the commit.
       - name: Commit the refreshed lockfile
         if: steps.rp.outputs.prs_created == 'true'
         run: |
@@ -82,23 +89,26 @@ jobs:
   deploy:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' || inputs.deploy }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install Rust (wasm32)
         run: |
           rustup toolchain install stable --profile minimal
           rustup target add wasm32-unknown-unknown
-      - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: jetli/wasm-pack-action@0d096b08b4e5a7de8c28de67e11e945404e9eefa # v0.4.0
         with:
           version: v0.13.1
-      - uses: extractions/setup-just@v3
-      - uses: oven-sh/setup-bun@v2
-      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
           workspaces: rust
 
       - run: just install
@@ -108,7 +118,7 @@ jobs:
       # in this repository, so a rebuilt artifact would ship unsignable bytes.
       - run: just build
 
-      - uses: cloudflare/wrangler-action@v3
+      - uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
         with:
           workingDirectory: worker
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
